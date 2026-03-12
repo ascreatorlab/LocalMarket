@@ -1,4 +1,4 @@
-/* ===== 🔐 FIREBASE CONFIG (firebase-config.js) ===== */
+/* ===== 🔐 FIREBASE CONFIG ===== */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { 
@@ -19,7 +19,7 @@ const firebaseConfig = {
   appId: "1:68118658961:web:ea785bdaf3b0caa84da430"
 };
 
-// ✅ Initialize Firebase (with duplicate check)
+// ✅ Initialize Firebase
 let app, auth, provider;
 
 try {
@@ -31,10 +31,10 @@ try {
   console.error("❌ Firebase init error:", error.message);
 }
 
-// ✅ Global flag: Other scripts can check if Firebase is ready
+// ✅ Global flag
 window.firebaseReady = (app !== undefined);
 
-// ✅ Safe DOM Update Helper (waits for DOM if needed)
+// ✅ Safe DOM Update Helper
 function safeDOMUpdate(callback) {
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", callback);
@@ -43,7 +43,7 @@ function safeDOMUpdate(callback) {
   }
 }
 
-// ✅ Global Login Function (Accessible from HTML)
+// ✅ Global Login Function
 window.googleLogin = function() {
   if (!auth) {
     alert("⚠️ Firebase not initialized. Please wait 2 seconds and try again.");
@@ -57,14 +57,11 @@ window.googleLogin = function() {
     })
     .catch((error) => {
       console.error("❌ Login error:", error.code, error.message);
-      
-      // ✅ Handle common errors gracefully
       switch (error.code) {
         case 'auth/popup-closed-by-user':
-          // User cancelled - no alert needed
           break;
         case 'auth/unauthorized-domain':
-          alert("❌ Domain not authorized. Add localhost to Firebase Console > Authorized Domains");
+          alert("❌ Domain not authorized. Add your domain to Firebase Console > Authorized Domains");
           break;
         case 'auth/network-request-failed':
           alert("⚠️ Network error. Please check your internet connection.");
@@ -97,52 +94,46 @@ window.logout = function() {
     console.error("❌ Logout error:", error.message);
   });
 };
-// ✅ Update Profile UI when user logs in
-function updateProfileUI(user) {
-  safeDOMUpdate(() => {
+
+// ✅ Update Profile UI
+function updateProfileUI(user) {  safeDOMUpdate(() => {
     const userName = document.getElementById("userName");
     const userEmail = document.getElementById("userEmail");
     const profileDetails = document.getElementById("profileDetails");
     const loginBtn = document.getElementById("googleLoginBtn");
     
-    if (userName) {
-      userName.innerText = `Welcome, ${user.displayName} 🎉`;
-    }
-    if (userEmail) {
-      userEmail.innerText = user.email;
-    }
-    if (profileDetails) {
-      profileDetails.classList.remove("hidden");
-    }
-    if (loginBtn) {
-      loginBtn.style.display = "none";
-    }
+    if (userName) userName.innerText = `Welcome, ${user.displayName} 🎉`;
+    if (userEmail) userEmail.innerText = user.email;
+    if (profileDetails) profileDetails.classList.remove("hidden");
+    if (loginBtn) loginBtn.style.display = "none";
     
     console.log("👤 Profile updated for:", user.email);
   });
 }
 
-// ✅ Listen for auth state changes (persists login across page reloads)
-onAuthStateChanged(auth, (user) => {
-  if (user) {
-    updateProfileUI(user);
-    window.dispatchEvent(new CustomEvent('userLoggedIn', { detail: user }));
-  } else {
-    safeDOMUpdate(() => {
-      const userName = document.getElementById("userName");
-      const userEmail = document.getElementById("userEmail");
-      const profileDetails = document.getElementById("profileDetails");
-      const loginBtn = document.getElementById("googleLoginBtn");
-      
-      if (userName) userName.innerText = "";
-      if (userEmail) userEmail.innerText = "";
-      if (profileDetails) profileDetails.classList.add("hidden");
-      if (loginBtn) loginBtn.style.display = "flex";
-    });
-  }
-});
+// ✅ Listen for auth state changes
+if (auth) {
+  onAuthStateChanged(auth, (user) => {
+    if (user) {
+      updateProfileUI(user);
+      window.dispatchEvent(new CustomEvent('userLoggedIn', { detail: user }));
+    } else {
+      safeDOMUpdate(() => {
+        const userName = document.getElementById("userName");
+        const userEmail = document.getElementById("userEmail");
+        const profileDetails = document.getElementById("profileDetails");
+        const loginBtn = document.getElementById("googleLoginBtn");
+        
+        if (userName) userName.innerText = "";
+        if (userEmail) userEmail.innerText = "";
+        if (profileDetails) profileDetails.classList.add("hidden");
+        if (loginBtn) loginBtn.style.display = "flex";
+      });
+    }
+  });
+}
 
-// ✅ Expose auth object for advanced use (optional)
+// ✅ Expose auth object
 window.knowMarketAuth = { auth, provider };
 
 console.log("🔐 Firebase config loaded | Ready for login");
