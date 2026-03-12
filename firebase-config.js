@@ -82,13 +82,14 @@ window.logout = function() {
   signOut(auth).then(() => {
     safeDOMUpdate(() => {
       const userName = document.getElementById("userName");
+      const userEmail = document.getElementById("userEmail");
       const profileDetails = document.getElementById("profileDetails");
       const loginBtn = document.getElementById("googleLoginBtn");
       
       if (userName) userName.innerText = "";
       if (userEmail) userEmail.innerText = "";
       if (profileDetails) profileDetails.classList.add("hidden");
-      if (loginBtn) loginBtn.style.display = "flex"; // Show login button again
+      if (loginBtn) loginBtn.style.display = "flex";
       
       console.log("✅ Logged out");
     });
@@ -125,12 +126,11 @@ function updateProfileUI(user) {
 onAuthStateChanged(auth, (user) => {
   if (user) {
     updateProfileUI(user);
-    // ✅ Optional: Dispatch custom event for other scripts to listen
     window.dispatchEvent(new CustomEvent('userLoggedIn', { detail: user }));
   } else {
-    // ✅ User logged out - reset UI
     safeDOMUpdate(() => {
       const userName = document.getElementById("userName");
+      const userEmail = document.getElementById("userEmail");
       const profileDetails = document.getElementById("profileDetails");
       const loginBtn = document.getElementById("googleLoginBtn");
       
