@@ -1,4 +1,4 @@
-/* ===== 🔐 FIREBASE CONFIG ===== */
+/* ===== 🔐 ZENVI - FIREBASE CONFIG ===== */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { 
@@ -9,7 +9,7 @@ import {
   onAuthStateChanged 
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
-// ✅ Your Firebase Config
+// ✅ Zenvi Firebase Config
 const firebaseConfig = {
   apiKey: "AIzaSyA-WhbKSkuAx9S9sDcOZ-zWW84Pew29Z5E",
   authDomain: "knowmarket-bfdf7.firebaseapp.com",
@@ -26,15 +26,15 @@ try {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   provider = new GoogleAuthProvider();
-  console.log("🔐 Firebase initialized successfully");
+  console.log("🔐 Firebase initialized ✅");
 } catch (error) {
   console.error("❌ Firebase init error:", error.message);
 }
 
-// ✅ Global flag
 window.firebaseReady = (app !== undefined);
+window.zenviAuth = { auth, provider };
 
-// ✅ Safe DOM Update Helper
+// ✅ Safe DOM helper
 function safeDOMUpdate(callback) {
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", callback);
@@ -43,97 +43,103 @@ function safeDOMUpdate(callback) {
   }
 }
 
-// ✅ Global Login Function
-window.googleLogin = function() {
-  if (!auth) {
-    alert("⚠️ Firebase not initialized. Please wait 2 seconds and try again.");
-    return;  }
-  
-  signInWithPopup(auth, provider)
-    .then((result) => {
-      const user = result.user;
-      updateProfileUI(user);
-      console.log("✅ Login successful:", user.displayName);
-    })
-    .catch((error) => {
-      console.error("❌ Login error:", error.code, error.message);
-      switch (error.code) {
-        case 'auth/popup-closed-by-user':
-          break;
-        case 'auth/unauthorized-domain':
-          alert("❌ Domain not authorized. Add your domain to Firebase Console > Authorized Domains");
-          break;
-        case 'auth/network-request-failed':
-          alert("⚠️ Network error. Please check your internet connection.");
-          break;
-        default:
-          alert("Login failed: " + error.message);
-      }
-    });
-};
-
-// ✅ Global Logout Function
-window.logout = function() {
-  if (!auth) return;
-  
-  signOut(auth).then(() => {
-    safeDOMUpdate(() => {
-      const userName = document.getElementById("userName");
-      const userEmail = document.getElementById("userEmail");
-      const profileDetails = document.getElementById("profileDetails");
-      const loginBtn = document.getElementById("googleLoginBtn");
-      
-      if (userName) userName.innerText = "";
-      if (userEmail) userEmail.innerText = "";
-      if (profileDetails) profileDetails.classList.add("hidden");
-      if (loginBtn) loginBtn.style.display = "flex";
-      
-      console.log("✅ Logged out");
-    });
-  }).catch((error) => {
-    console.error("❌ Logout error:", error.message);
-  });
-};
-
 // ✅ Update Profile UI
-function updateProfileUI(user) {  safeDOMUpdate(() => {
-    const userName = document.getElementById("userName");
-    const userEmail = document.getElementById("userEmail");
-    const profileDetails = document.getElementById("profileDetails");
-    const loginBtn = document.getElementById("googleLoginBtn");
-    
-    if (userName) userName.innerText = `Welcome, ${user.displayName} 🎉`;
-    if (userEmail) userEmail.innerText = user.email;
-    if (profileDetails) profileDetails.classList.remove("hidden");
-    if (loginBtn) loginBtn.style.display = "none";
-    
-    console.log("👤 Profile updated for:", user.email);
-  });
-}
+function updateProfileUI(user) {
+  safeDOMUpdate(() => {
+    // Hero section updates
+    const nameEl = document.getElementById("profileDisplayName");
+    const emailTop = document.getElementById("profileEmailTop");
+    const avatarIcon = document.getElementById("profileAvatarIcon");
+    const avatarImg = document.getElementById("profileAvatarImg");
+    const onlineDot = document.getElementById("profileOnlineDot");
 
-// ✅ Listen for auth state changes
-if (auth) {
-  onAuthStateChanged(auth, (user) => {
-    if (user) {
-      updateProfileUI(user);
-      window.dispatchEvent(new CustomEvent('userLoggedIn', { detail: user }));
-    } else {
-      safeDOMUpdate(() => {
-        const userName = document.getElementById("userName");
-        const userEmail = document.getElementById("userEmail");
-        const profileDetails = document.getElementById("profileDetails");
-        const loginBtn = document.getElementById("googleLoginBtn");
-        
-        if (userName) userName.innerText = "";
-        if (userEmail) userEmail.innerText = "";
-        if (profileDetails) profileDetails.classList.add("hidden");
-        if (loginBtn) loginBtn.style.display = "flex";
-      });
+    if (nameEl) nameEl.textContent = user.displayName || "User";
+    if (emailTop) emailTop.textContent = user.email;
+    if (onlineDot) onlineDot.style.display = "block";
+
+    // Show Google profile photo
+    if (user.photoURL && avatarImg && avatarIcon) {
+      avatarImg.src = user.photoURL;
+      avatarImg.style.display = "block";
+      avatarIcon.style.display = "none";
+    }
+
+    // Show profile details, hide login card
+    const loginCard = document.getElementById("loginCard");
+    const profileDetails = document.getElementById("profileDetails");
+    const userEmail = document.getElementById("userEmail");
+    const joinDate = document.getElementById("joinDate");
+
+    if (loginCard) loginCard.style.display = "none";
+    if (profileDetails) profileDetails.classList.remove("hidden");
+    if (userEmail) userEmail.textContent = user.email;
+    if (joinDate) {
+      const d = user.metadata?.creationTime
+        ? new Date(user.metadata.creationTime).toLocaleDateString('hi-IN', {year:'numeric',month:'long'})
+        : "Recently joined";
+      joinDate.textContent = `Joined: ${d}`;
     }
   });
 }
 
-// ✅ Expose auth object
-window.knowMarketAuth = { auth, provider };
+// ✅ Reset Profile UI
+function resetProfileUI() {
+  safeDOMUpdate(() => {
+    const nameEl = document.getElementById("profileDisplayName");
+    const emailTop = document.getElementById("profileEmailTop");
+    const avatarIcon = document.getElementById("profileAvatarIcon");
+    const avatarImg = document.getElementById("profileAvatarImg");
+    const onlineDot = document.getElementById("profileOnlineDot");
+    const loginCard = document.getElementById("loginCard");
+    const profileDetails = document.getElementById("profileDetails");
 
-console.log("🔐 Firebase config loaded | Ready for login");
+    if (nameEl) nameEl.textContent = "Guest User";
+    if (emailTop) emailTop.textContent = "Login karein apna account access karne ke liye";
+    if (onlineDot) onlineDot.style.display = "none";
+    if (avatarImg) { avatarImg.style.display = "none"; avatarImg.src = ""; }
+    if (avatarIcon) avatarIcon.style.display = "block";
+    if (loginCard) loginCard.style.display = "block";
+    if (profileDetails) profileDetails.classList.add("hidden");
+  });
+}
+
+// ✅ Google Login
+window.googleLogin = function() {
+  if (!auth) { alert("⚠️ Firebase not ready. 2 second baad try karein."); return; }
+  signInWithPopup(auth, provider)
+    .then(result => updateProfileUI(result.user))
+    .catch(error => {
+      if (error.code === 'auth/popup-closed-by-user') return;
+      if (error.code === 'auth/unauthorized-domain') {
+        alert("❌ Domain authorized nahi hai.\nFirebase Console → Authentication → Authorized domains mein add karein.");
+      } else if (error.code === 'auth/popup-blocked') {
+        alert("⚠️ Popup blocked. Browser mein popups allow karein.");
+      } else {
+        alert("Login failed: " + error.message);
+      }
+    });
+};
+
+// ✅ Logout
+window.logout = function() {
+  if (!auth) return;
+  signOut(auth).then(() => resetProfileUI()).catch(console.error);
+};
+
+// ✅ Auth State Listener
+if (auth) {
+  onAuthStateChanged(auth, user => {
+    if (user) updateProfileUI(user);
+    else resetProfileUI();
+  });
+}
+
+// ✅ Wire up buttons after DOM ready
+document.addEventListener("DOMContentLoaded", () => {
+  const loginBtn = document.getElementById("googleLoginBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
+  if (loginBtn) loginBtn.addEventListener("click", window.googleLogin);
+  if (logoutBtn) logoutBtn.addEventListener("click", window.logout);
+});
+
+console.log("🔐 Firebase config loaded ✅");
