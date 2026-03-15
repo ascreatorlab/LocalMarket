@@ -1573,15 +1573,26 @@ function onProfileOpen() {
 // ===== SPLASH SCREEN =====
 let splashHidden = false;
 function hideSplash() {
-  if (splashHidden) return; // Double splash fix
+  if (splashHidden) return;
   splashHidden = true;
-  setTimeout(() => {
-    const splash = document.getElementById("splashScreen");
-    if (splash) {
+
+  const splash = document.getElementById("splashScreen");
+  if (!splash) return;
+
+  // Check if this is a refresh (not first load)
+  const isRefresh = sessionStorage.getItem("zenvi_launched");
+
+  if (isRefresh) {
+    // Refresh — remove splash immediately, no animation
+    splash.remove();
+  } else {
+    // First launch — show full splash
+    sessionStorage.setItem("zenvi_launched", "1");
+    setTimeout(() => {
       splash.classList.add("hide");
       setTimeout(() => splash.remove(), 500);
-    }
-  }, 2000);
+    }, 2000);
+  }
 }
 
 // ===== INIT =====
@@ -1619,26 +1630,37 @@ document.addEventListener("visibilitychange", () => {
 document.addEventListener("DOMContentLoaded", () => {
   console.log("🚀 Zenvi starting...");
 
-  // Clear old bad location data (Bettiah,Bettiah fix)
+  // Clear old bad location data
   const badNames = ["Bettiah, Bettiah", "Bettiah,Bettiah", "Bettiah"];
   const savedName = localStorage.getItem("zenvi_location_name");
   if (savedName && badNames.includes(savedName.trim())) {
     localStorage.removeItem("zenvi_location");
     localStorage.removeItem("zenvi_location_name");
     localStorage.removeItem("zenvi_location_addr");
-    console.log("🧹 Cleared bad location data");
   }
 
-  hideSplash();
-  restoreSavedLocation();
-  fetchLivePrices();
-  
+  // Check if refresh or first load
+  const isRefresh = sessionStorage.getItem("zenvi_launched");
   const lastPage = restoreAppState();
-  showPage(lastPage);
-  
+
+  if (isRefresh) {
+    // REFRESH — instant, no splash, restore page
+    console.log("🔄 Refresh detected — restoring page:", lastPage);
+    hideSplash(); // removes splash instantly
+    restoreSavedLocation();
+    showPage(lastPage);
+    fetchLivePrices();
+  } else {
+    // FIRST LAUNCH — show splash
+    hideSplash();
+    restoreSavedLocation();
+    showPage("home");
+    fetchLivePrices();
+  }
+
   setupSearch();
   setupEvents();
-  console.log("✅ Zenvi ready! Page:", lastPage);
+  console.log("✅ Zenvi ready!");
 });
 
 // ===== AUTO REFRESH (5 min) =====
