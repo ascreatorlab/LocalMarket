@@ -4,7 +4,7 @@
   "short_name": "Zenvi",
   "description": "Live mandi prices, nearby markets aur AI insights — India ke liye. Powered by Zenvi.",
   "start_url": "./index.html",
-  "scope": "/",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f0fdf4",
