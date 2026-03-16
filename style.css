@@ -1199,3 +1199,16 @@ body.dark-mode .form-group select,
 body.dark-mode .form-group textarea { background: #0f172a; border-color: #334155; color: #f1f5f9; }
 body.dark-mode .no-shops { background: #1e293b; }
 body.dark-mode .shop-register-banner { background: linear-gradient(135deg, #166534, #14532d); }
+
+/* ===== FAVOURITE BUTTON ON CARDS ===== */
+.fav-toggle-btn {
+  width: 38px; height: 38px;
+  background: #f8fafc; border: 1.5px solid #e2e8f0;
+  border-radius: 8px; font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: all 0.2s;
+}
+.fav-toggle-btn:active { transform: scale(0.9); }
+.fav-toggle-btn.fav-active {
+  background: #fee2e2; border-color: #fecaca;
+}
