@@ -17,6 +17,15 @@ document.addEventListener("DOMContentLoaded", () => {
 const MAPPLS_API_KEY = "0daf1373cd967b80d2c6f73effdfd849";
 // Note: Keys are domain-restricted to zenvi-app.github.io only
 
+
+// ===== COORDINATE DETECTION HELPER =====
+function isCoordinateString(str) {
+  if (!str) return true;
+  return /^-?\d+\.\d+,?\s*-?\d+\.\d+$/.test(str.trim()) ||
+         str.trim() === "" || 
+         ["null","undefined","Selected Location","Map pe location chunein..."].includes(str.trim());
+}
+
 // ===== STATE =====
 let marketData = [];
 let mapplsMap = null;
@@ -786,8 +795,8 @@ function setupSwiggyCenterPin() {
       // ✅ IMMEDIATELY update currentLocation — confirm will always work
       currentLocation = {
         lat, lng,
-        name: "Selected Location",
-        fullAddr: `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+        name: "",
+        fullAddr: ""
       };
 
       forceEnableConfirm();
@@ -916,10 +925,13 @@ async function reverseGeocode(lat, lng) {
 
   } catch(e) {
     console.warn("Both geocodes failed:", e.message);
-    const coordName = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
     if (nameEl) nameEl.textContent = "Location selected ✓";
-    if (addrEl) addrEl.textContent = coordName;
-    currentLocation = { lat, lng, name: coordName, fullAddr: "" };
+    if (addrEl) addrEl.textContent = "";
+    // Keep lat/lng but no coordinate string as name
+    if (currentLocation) {
+      currentLocation.name = "";
+      currentLocation.fullAddr = "";
+    }
     forceEnableConfirm();
   }
 }
@@ -1191,31 +1203,46 @@ function confirmAndProceed() {
     return;
   }
 
-  // Use proper name or fallback to coordinates
-  const place = (currentLocation.name && currentLocation.name !== "Selected Location")
-    ? currentLocation.name
-    : `${currentLocation.lat.toFixed(4)}, ${currentLocation.lng.toFixed(4)}`;
+  const place = currentLocation.name || "";
   const fullAddr = currentLocation?.fullAddr || "";
+
+  // ❌ Don't save coordinate strings as location name
+  if (isCoordinateString(place)) {
+    // Try to get name first, then confirm
+    const nameEl = document.getElementById("selectedLocationName");
+    const displayedName = nameEl?.textContent || "";
+    if (isCoordinateString(displayedName) || displayedName === "📍 Dhundh raha hai...") {
+      showToast("⏳ Location naam aa raha hai... dobara try karein");
+      return;
+    }
+    currentLocation.name = displayedName;
+    currentLocation.fullAddr = document.getElementById("selectedLocationAddress")?.textContent || "";
+  }
+
+  const finalPlace = currentLocation.name;
+  const finalAddr = currentLocation.fullAddr || "";
 
   // 🔐 Login check — bina login ke bhi allow karo (localStorage mein save)
   const isLoggedIn = window.zenviAuth?.auth?.currentUser;
   if (!isLoggedIn) {
     // Still save locally but show login nudge
-    showToast("📍 Location saved! Login karein cloud sync ke liye 🔐");
+    if (!isCoordinateString(finalPlace)) showToast(`📍 ${finalPlace} saved!`); else showToast("📍 Location saved! Login karein cloud sync ke liye 🔐");
   } else {
-    showToast(`📍 Location saved: ${place}`);
+    if (!isCoordinateString(finalPlace)) showToast(`📍 ${finalPlace} saved! ☁️`);
     // Save to Firebase cloud
     if (window.saveLocationToCloud) window.saveLocationToCloud(currentLocation);
   }
 
   // ✅ Always save to localStorage
   localStorage.setItem("zenvi_location", JSON.stringify(currentLocation));
-  localStorage.setItem("zenvi_location_name", place);
-  localStorage.setItem("zenvi_location_addr", fullAddr);
+  localStorage.setItem("zenvi_location_name", finalPlace);
+  localStorage.setItem("zenvi_location_addr", finalAddr);
 
-  // Update home header
+  // Update home header — never show coordinates
   const homeAddr = document.getElementById("homeAddress");
-  if (homeAddr) homeAddr.innerText = place + (fullAddr ? `, ${fullAddr.split(",")[0]}` : "");
+  if (homeAddr && !isCoordinateString(finalPlace)) {
+    homeAddr.innerText = finalPlace + (finalAddr ? `, ${finalAddr.split(",")[0]}` : "");
+  }
 
   showPage("home");
 }
@@ -1749,11 +1776,10 @@ document.addEventListener("visibilitychange", () => {
 document.addEventListener("DOMContentLoaded", () => {
   console.log("🚀 Zenvi starting...");
 
-  // Clear ALL bad location data — coordinates aur invalid names
+  // Clear ALL bad/coordinate location data on startup
   const savedName = localStorage.getItem("zenvi_location_name") || "";
   const badNames = ["Bettiah, Bettiah", "Bettiah,Bettiah", "Bettiah"];
-  const hasCommaDigits = /\d+\.\d+/.test(savedName); // catches "26.8018, 84.5037"
-  const isBadLocation = !savedName || badNames.includes(savedName.trim()) || hasCommaDigits;
+  const isBadLocation = isCoordinateString(savedName) || badNames.includes(savedName.trim());
   if (isBadLocation) {
     localStorage.removeItem("zenvi_location");
     localStorage.removeItem("zenvi_location_name");
