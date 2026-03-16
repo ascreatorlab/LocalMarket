@@ -131,9 +131,16 @@ function renderItems(data) {
       </div>
       <div class="trend ${item.trend}">${trendIcon} ${trendText}</div>
       <span class="category-tag">${escapeHtml(item.category)}</span>
-      <button class="suggest-price-btn" onclick="event.stopPropagation(); openSuggestPrice('${escapeHtml(item.name)}', '${item.price}')">
-        ✏️ Suggest Price
-      </button>
+      <div style="display:flex;gap:6px;margin-top:8px;">
+        <button class="suggest-price-btn" style="flex:1;" onclick="event.stopPropagation(); openSuggestPrice('${escapeHtml(item.name)}', '${item.price}')">
+          ✏️ Suggest
+        </button>
+        <button class="fav-toggle-btn ${isFavourite(item.name) ? 'fav-active' : ''}" 
+          onclick="event.stopPropagation(); toggleFavourite({name:'${escapeHtml(item.name)}',emoji:'${item.emoji}',price:'${item.price}',unit:'${item.unit}'}); this.classList.toggle('fav-active'); this.textContent = this.classList.contains('fav-active') ? '❤️' : '🤍';"
+          title="Favourite add karein">
+          ${isFavourite(item.name) ? '❤️' : '🤍'}
+        </button>
+      </div>
     `;
     card.addEventListener("click", () => {
       document.getElementById("searchInput").value = item.name;
@@ -272,8 +279,28 @@ const DATA_API_URL = `https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a
 
 async function fetchLivePrices() {
   const grid = document.getElementById("itemsGrid");
+
+  // ===== INSTANT CACHE LOAD =====
+  // Show cached data immediately while fresh data loads
+  try {
+    const cached = localStorage.getItem("zenvi_prices");
+    const cacheTime = localStorage.getItem("zenvi_prices_time");
+    const cacheAge = cacheTime ? (Date.now() - parseInt(cacheTime)) / 1000 / 60 : 999; // minutes
+
+    if (cached && cacheAge < 60) { // Cache valid for 60 minutes
+      const cachedData = JSON.parse(cached);
+      if (cachedData.length > 0) {
+        marketData = cachedData;
+        renderItems(marketData);
+        setDataSource(`🟡 Cached (${Math.round(cacheAge)}m ago)`);
+        console.log(`📦 Loaded ${marketData.length} items from cache`);
+        // Still fetch fresh in background
+      }
+    }
+  } catch(e) {}
+
+  // Show skeleton only if no cache
   if (grid && marketData.length === 0) {
-    // Skeleton loader — shimmer cards
     grid.innerHTML = Array(6).fill(`
       <div class="item-card skeleton-card">
         <div class="skel skel-emoji"></div>
@@ -307,16 +334,16 @@ async function fetchLivePrices() {
 
     const rawData = Object.entries(priceMap).map(([name, d]) => ({
       name,
-      price: d.sum / d.count,  // average
+      price: d.sum / d.count,
       minPrice: d.min,
       maxPrice: d.max,
-      hasRange: d.max > d.min * 1.1  // show range if >10% difference
+      hasRange: d.max > d.min * 1.1
     }));
 
     if (rawData.length === 0) throw new Error("Empty after processing");
 
     marketData = rawData
-      .filter(item => item.price >= 0.5 && item.price <= 2000) // Remove crazy values
+      .filter(item => item.price >= 0.5 && item.price <= 2000)
       .map(item => ({
         ...item,
         price: item.price.toFixed(2),
@@ -329,13 +356,18 @@ async function fetchLivePrices() {
 
     renderItems(marketData);
     setDataSource("🟢 Live — data.gov.in");
-    console.log("✅ Loaded", marketData.length, "unique items");
+    console.log("✅ Loaded", marketData.length, "fresh items");
 
-    // Merge community prices from Firestore
+    // ✅ Save to cache
+    try {
+      localStorage.setItem("zenvi_prices", JSON.stringify(marketData));
+      localStorage.setItem("zenvi_prices_time", Date.now().toString());
+    } catch(e) {}
+
+    // Merge community prices
     if (window.loadCommunityPrices) {
       window.loadCommunityPrices().then(communityPrices => {
         if (communityPrices.length > 0) {
-          // Override API prices with community-verified prices
           const names = new Set(marketData.map(i => i.name.toLowerCase()));
           const newItems = communityPrices
             .filter(c => !names.has(c.name.toLowerCase()))
@@ -356,8 +388,13 @@ async function fetchLivePrices() {
 
   } catch (err) {
     console.warn("⚠️ API failed:", err.message);
-    useFallbackData();
-    setDataSource("🟡 Sample data (API offline)");
+    // Use cache if available, else fallback
+    if (marketData.length > 0) {
+      setDataSource("🟡 Cached data (API offline)");
+    } else {
+      useFallbackData();
+      setDataSource("🟡 Sample data (API offline)");
+    }
   }
 }
 
@@ -868,7 +905,7 @@ async function reverseGeocode(lat, lng) {
       } else if (cleanLocal) {
         displayName = cleanLocal;
       } else {
-        displayName = cleanCity || r.formatted_address?.split(",")[0] || "Selected Location";
+        displayName = cleanCity || r.formatted_address?.split(",")[0] || "Nearby Area";
       }
 
       const fullAddr = [cleanCity, stateName].filter(Boolean).join(", ");
@@ -1220,6 +1257,12 @@ function confirmAndProceed() {
   }
 
   const finalPlace = currentLocation.name;
+
+  // Strong validation — block coordinates
+  if (!finalPlace || isCoordinateString(finalPlace)) {
+    showToast("⏳ Location naam aa raha hai... thoda wait karein");
+    return;
+  }
   const finalAddr = currentLocation.fullAddr || "";
 
   // 🔐 Login check — bina login ke bhi allow karo (localStorage mein save)
@@ -1240,7 +1283,7 @@ function confirmAndProceed() {
 
   // Update home header — never show coordinates
   const homeAddr = document.getElementById("homeAddress");
-  if (homeAddr && !isCoordinateString(finalPlace)) {
+  if (homeAddr && finalPlace && !isCoordinateString(finalPlace)) {
     homeAddr.innerText = finalPlace + (finalAddr ? `, ${finalAddr.split(",")[0]}` : "");
   }
 
@@ -1535,19 +1578,77 @@ function removeAlert(idx) {
 }
 
 function addPriceAlert() {
-  const items = marketData.map(i => i.name).slice(0, 10).join(', ');
-  const itemName = prompt(`Kaunsi item ka alert chahiye?\n(${items})`);
-  if (!itemName) return;
-  const item = marketData.find(i => i.name.toLowerCase() === itemName.toLowerCase().trim());
-  if (!item) { alert(`"${itemName}" hamare data mein nahi hai.`); return; }
-  const price = prompt(`${item.emoji} ${item.name} abhi ₹${item.price}/kg hai.\nKitne price pe alert chahiye? (₹)`);
-  if (!price || isNaN(price)) return;
-  priceAlerts.push({ name: item.name, emoji: item.emoji, targetPrice: parseInt(price), currentPrice: item.price });
-  localStorage.setItem('zenvi_alerts', JSON.stringify(priceAlerts));
-  renderAlerts();
-  updateProfileStats();
-  alert(`✅ Alert set! Jab ${item.name} ₹${price} se kam ho, aapko pata chalega.`);
+  // Create proper modal instead of ugly prompt
+  let modal = document.getElementById("alertModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "alertModal";
+    document.body.appendChild(modal);
+  }
+  
+  const topItems = marketData.slice(0, 20);
+  
+  modal.style.cssText = "position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.5);display:flex;align-items:flex-end;";
+  modal.innerHTML = `
+    <div style="background:white;width:100%;border-radius:24px 24px 0 0;padding:24px 20px 40px;">
+      <div style="width:40px;height:4px;background:#e2e8f0;border-radius:99px;margin:0 auto 20px;"></div>
+      <h3 style="font-size:17px;font-weight:800;margin-bottom:4px;">🔔 Price Alert Set Karein</h3>
+      <p style="font-size:13px;color:#64748b;margin-bottom:16px;">Jab price neeche aaye tab notify karo</p>
+      
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px;font-weight:700;color:#64748b;display:block;margin-bottom:6px;">ITEM CHUNEIN</label>
+        <select id="alertItemSelect" style="width:100%;padding:12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;font-family:inherit;outline:none;">
+          <option value="">-- Item select karein --</option>
+          ${topItems.map(i => `<option value="${i.name}">${i.emoji} ${i.name} (abhi ₹${i.price}/kg)</option>`).join('')}
+        </select>
+      </div>
+      
+      <div style="margin-bottom:20px;">
+        <label style="font-size:12px;font-weight:700;color:#64748b;display:block;margin-bottom:6px;">ALERT PRICE (₹/kg)</label>
+        <div style="display:flex;align-items:center;gap:8px;border:1.5px solid #e2e8f0;border-radius:10px;padding:12px;">
+          <span style="font-size:18px;font-weight:800;color:#16a34a;">₹</span>
+          <input id="alertPriceInput" type="number" min="1" max="10000" 
+            placeholder="Kitne price pe alert chahiye?"
+            style="flex:1;border:none;outline:none;font-size:16px;font-weight:700;font-family:inherit;">
+          <span style="color:#64748b;font-size:13px;">/kg</span>
+        </div>
+      </div>
+      
+      <div style="display:flex;gap:10px;">
+        <button onclick="document.getElementById('alertModal').style.display='none';"
+          style="flex:1;padding:14px;background:#f1f5f9;color:#64748b;border:none;border-radius:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+          Cancel
+        </button>
+        <button onclick="saveAlertFromModal()"
+          style="flex:2;padding:14px;background:#16a34a;color:white;border:none;border-radius:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+          🔔 Set Alert
+        </button>
+      </div>
+    </div>
+  `;
+  
+  modal.style.display = "flex";
+  modal.onclick = e => { if (e.target === modal) modal.style.display = "none"; };
 }
+
+window.saveAlertFromModal = function() {
+  const itemName = document.getElementById("alertItemSelect")?.value;
+  const price = document.getElementById("alertPriceInput")?.value;
+  
+  if (!itemName) { showToast("⚠️ Item select karein!"); return; }
+  if (!price || isNaN(price) || price <= 0) { showToast("⚠️ Valid price daalen!"); return; }
+  
+  const item = marketData.find(i => i.name === itemName);
+  if (!item) { showToast("⚠️ Item nahi mila"); return; }
+  
+  priceAlerts.push({ name: item.name, emoji: item.emoji, targetPrice: parseFloat(price), currentPrice: item.price });
+  localStorage.setItem('zenvi_alerts', JSON.stringify(priceAlerts));
+  
+  document.getElementById("alertModal").style.display = "none";
+  renderAlerts?.();
+  updateProfileStats?.();
+  showToast(`✅ Alert set! ${item.emoji} ${item.name} ₹${price} se kam hone pe notify karega`);
+};
 
 function updateProfileStats() {
   const upCount = marketData.filter(i => i.trend === 'up').length;
@@ -1784,8 +1885,20 @@ document.addEventListener("DOMContentLoaded", () => {
     localStorage.removeItem("zenvi_location");
     localStorage.removeItem("zenvi_location_name");
     localStorage.removeItem("zenvi_location_addr");
+    // Also clear cached prices with coordinate names
+    localStorage.removeItem("zenvi_prices");
+    localStorage.removeItem("zenvi_prices_time");
     console.log("🧹 Cleared bad location:", savedName || "(empty)");
   }
+  
+  // Force clear any cached coordinate location
+  try {
+    const cachedLoc = JSON.parse(localStorage.getItem("zenvi_location") || "{}");
+    if (cachedLoc.name && isCoordinateString(cachedLoc.name)) {
+      localStorage.removeItem("zenvi_location");
+      localStorage.removeItem("zenvi_location_name");
+    }
+  } catch(e) {}
 
   const isRefresh = sessionStorage.getItem("zenvi_launched");
   const lastPage = restoreAppState();
