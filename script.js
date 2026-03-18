@@ -358,6 +358,16 @@ async function fetchLivePrices() {
     setDataSource("🟢 Live — data.gov.in");
     console.log("✅ Loaded", marketData.length, "fresh items");
 
+    // Init Fuse.js for fuzzy search
+    if (window.Fuse) {
+      window._fuse = new window.Fuse(marketData, {
+        keys: ["name","category"],
+        threshold: 0.4,
+        includeScore: true
+      });
+      console.log("🔍 Fuse.js ready");
+    }
+
     // ✅ Save to cache
     try {
       localStorage.setItem("zenvi_prices", JSON.stringify(marketData));
@@ -517,14 +527,79 @@ const hindiMap = {
   'makka':'maize', 'jau':'barley', 'chana':'gram', 'bajra':'bajra'
 };
 
+// Hindi/regional aliases for smart search
+const HINDI_ALIASES = {
+  "aalu":"potato","aloo":"potato","alu":"potato","aaloo":"potato","aalu":"potato",
+  "tamatar":"tomato","tamaatar":"tomato","timatar":"tomato","tometo":"tomato",
+  "pyaj":"onion","pyaaz":"onion","piyaz":"onion","kanda":"onion","piaz":"onion",
+  "gajar":"carrot","gaajar":"carrot","gaajr":"carrot",
+  "gobhi":"cauliflower","phoolgobi":"cauliflower","patta gobhi":"cabbage","bandgobhi":"cabbage",
+  "mirchi":"chilli","hari mirchi":"green chilli","lal mirchi":"red chilli",
+  "palak":"spinach","saag":"spinach",
+  "bhindi":"okra","ladyfinger":"okra","bhende":"okra",
+  "kaddu":"pumpkin","lauki":"bottlegourd","karela":"bitter gourd","tinda":"tinda",
+  "baigan":"brinjal","baingan":"brinjal","bengan":"brinjal",
+  "matar":"peas","hara matar":"green peas","vatana":"peas",
+  "nimbu":"lemon","nimboo":"lemon","neembu":"lemon",
+  "adrak":"ginger","lahsun":"garlic","lasun":"garlic",
+  "gehun":"wheat","gehu":"wheat","gahu":"wheat",
+  "chawal":"rice","dhan":"paddy","arwa":"rice",
+  "dal":"lentil","masoor":"lentil","moong":"green gram","urad":"black gram",
+  "makka":"maize","bhutta":"corn","makai":"maize",
+  "aam":"mango","kela":"banana","seb":"apple","saib":"apple",
+  "angur":"grapes","narangi":"orange","santra":"orange","malta":"orange",
+  "tarbuj":"watermelon","kharbuja":"muskmelon","tarbooj":"watermelon",
+  "imli":"tamarind","nariyal":"coconut","singhara":"water chestnut",
+};
+
+function normalize(text) {
+  return text.toLowerCase()
+    .replace(/aa/g,"a").replace(/oo/g,"u").replace(/ee/g,"i")
+    .replace(/ph/g,"f").replace(/kh/g,"k").trim();
+}
+
 function filterItems(term) {
   if (!term || !term.trim()) { renderItems(marketData); return; }
-  const searchTerm = term.toLowerCase().trim();
-  const englishTerm = hindiMap[searchTerm] || searchTerm;
+  const query = term.toLowerCase().trim();
+  const normQ = normalize(query);
+
+  // Check Hindi alias
+  const alias = HINDI_ALIASES[query] || HINDI_ALIASES[normQ] || HINDI_ALIASES[hindiMap?.[query]] || "";
+
+  // Use Fuse.js if loaded
+  if (window._fuse) {
+    const seen = new Set();
+    const results = [];
+
+    const addResult = (item) => {
+      if (!seen.has(item.name)) { seen.add(item.name); results.push(item); }
+    };
+
+    // Search original query
+    window._fuse.search(query).forEach(r => addResult(r.item));
+    // Search alias if found
+    if (alias) window._fuse.search(alias).forEach(r => addResult(r.item));
+    // Search normalized
+    if (normQ !== query) window._fuse.search(normQ).forEach(r => addResult(r.item));
+
+    // Also add direct substring matches not caught by fuse
+    marketData.forEach(item => {
+      const n = item.name.toLowerCase();
+      if (n.includes(query) || n.includes(alias) || normalize(n).includes(normQ)) {
+        addResult(item);
+      }
+    });
+
+    renderItems(results.length > 0 ? results : []);
+    return;
+  }
+
+  // Fallback without Fuse
+  const englishTerm = hindiMap[query] || alias || query;
   const filtered = marketData.filter(item => {
-    const name = item.name.toLowerCase();
-    const cat = item.category.toLowerCase();
-    return name.includes(searchTerm) || name.includes(englishTerm) || cat.includes(searchTerm);
+    const n = item.name.toLowerCase();
+    return n.includes(query) || n.includes(englishTerm) ||
+           normalize(n).includes(normQ) || item.category.toLowerCase().includes(query);
   });
   renderItems(filtered);
 }
@@ -1232,28 +1307,38 @@ function confirmAndProceed() {
     return;
   }
 
-  // Get name — try all sources, NEVER block the user
   const nameEl = document.getElementById("selectedLocationName");
   const addrEl = document.getElementById("selectedLocationAddress");
-  const shownName = nameEl?.textContent?.trim() || "";
-  const shownAddr = addrEl?.textContent?.trim() || "";
+  const shownName = (nameEl?.textContent || "").trim();
+  const shownAddr = (addrEl?.textContent || "").trim();
 
-  // Best available name
-  let name = currentLocation.name || "";
-  let addr = currentLocation.fullAddr || "";
+  const isValid = (n) => n && n.length > 2 
+    && n !== "📍 Dhundh raha hai..." 
+    && n !== "Map pe location chunein..."
+    && n !== "Location selected ✓"
+    && !isCoordinateString(n);
 
-  // If geocode gave us a real name, use it
-  if (shownName && shownName !== "📍 Dhundh raha hai..." && shownName.length > 2 && !isCoordinateString(shownName)) {
-    name = shownName;
-    addr = shownAddr;
+  // If geocode is still loading, wait up to 4 seconds
+  if (shownName === "📍 Dhundh raha hai..." || (!isValid(shownName) && !isValid(currentLocation.name))) {
+    const btn = document.getElementById("confirmBtn");
+    if (btn) { btn.innerHTML = "⏳ Naam aa raha hai..."; btn.disabled = true; }
+    let tries = 0;
+    const iv = setInterval(() => {
+      tries++;
+      const n = (document.getElementById("selectedLocationName")?.textContent || "").trim();
+      if (isValid(n) || tries >= 8) {
+        clearInterval(iv);
+        if (btn) { btn.innerHTML = "📍 Confirm Location"; btn.disabled = false; }
+        confirmAndProceed(); // retry
+      }
+    }, 500);
+    return;
   }
 
-  // If still no name, use a simple label — never block
-  if (!name || name === "📍 Dhundh raha hai..." || isCoordinateString(name)) {
-    name = "My Location";
-  }
+  // Use best available name
+  let name = isValid(shownName) ? shownName : (isValid(currentLocation.name) ? currentLocation.name : "My Location");
+  let addr = shownAddr || currentLocation.fullAddr || "";
 
-  // Update and save
   currentLocation.name = name;
   currentLocation.fullAddr = addr;
 
@@ -1261,11 +1346,9 @@ function confirmAndProceed() {
   localStorage.setItem("zenvi_location_name", name);
   localStorage.setItem("zenvi_location_addr", addr);
 
-  // Update header
   const homeAddr = document.getElementById("homeAddress");
-  if (homeAddr) homeAddr.innerText = name + (addr ? `, ${addr.split(",")[0]}` : "");
+  if (homeAddr) homeAddr.innerText = name + (addr && !addr.includes(name) ? `, ${addr.split(",")[0]}` : "");
 
-  // Cloud sync if logged in
   if (window.zenviAuth?.auth?.currentUser && window.saveLocationToCloud) {
     window.saveLocationToCloud(currentLocation);
   }
