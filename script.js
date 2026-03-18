@@ -867,110 +867,103 @@ function setupSwiggyCenterPin() {
 async function reverseGeocode(lat, lng) {
   const nameEl = document.getElementById("selectedLocationName");
   const addrEl = document.getElementById("selectedLocationAddress");
-
   if (nameEl) nameEl.textContent = "📍 Dhundh raha hai...";
 
-  // ===== TRY MAPPLS FIRST (India-specific, knows local Bihar areas) =====
+  function setLocation(displayName, fullAddr) {
+    if (!displayName || displayName === "Nearby Area") return false;
+    if (nameEl) nameEl.textContent = displayName;
+    if (addrEl) addrEl.textContent = fullAddr || "";
+    currentLocation = { lat, lng, name: displayName, fullAddr: fullAddr || "" };
+    forceEnableConfirm();
+    return true;
+  }
+
+  // Run Mappls + Nominatim in PARALLEL for speed
+  const mapplsPromise = fetch(
+    `https://apis.mappls.com/advancedmaps/v1/${MAPPLS_API_KEY}/rev_geocode?lat=${lat}&lng=${lng}`,
+    { signal: AbortSignal.timeout(5000) }
+  ).then(r => r.json()).catch(() => null);
+
+  const nominatimPromise = fetch(
+    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+    { headers: { 'Accept-Language': 'hi,en' }, signal: AbortSignal.timeout(6000) }
+  ).then(r => r.json()).catch(() => null);
+
+  // Try Mappls first
   try {
-    const res = await fetch(
-      `https://apis.mappls.com/advancedmaps/v1/${MAPPLS_API_KEY}/rev_geocode?lat=${lat}&lng=${lng}`,
-      { signal: AbortSignal.timeout(5000) }
-    );
-    const data = await res.json();
-
-    console.log("🗺️ Mappls geocode:", JSON.stringify(data?.results?.[0]));
-
+    const data = await mapplsPromise;
     if (data?.results?.length > 0) {
       const r = data.results[0];
-
-      // Mappls fields — most local first
-      const localName =
-        r.locality ||        // "Uttarwari Pokhra" — exact locality!
-        r.subLocality ||     // sub-locality
-        r.subSubLocality ||  // even smaller area
-        r.village ||         // village name
-        r.area ||            // area name
-        r.street;            // street name
-
-      const cityName = r.city || r.district || "";
+      console.log("🗺️ Mappls:", JSON.stringify(r));
+      
+      // Extract ALL possible name fields
+      const localName = r.subSubLocality || r.subLocality || r.locality || 
+                        r.village || r.area || r.street || r.poi ||
+                        r.houseNumber;
+      const cityName = r.city || r.district || r.subDistrict || "";
       const stateName = r.state || "";
-
-      // Clean display: "Uttarwari Pokhra, Bettiah"
+      
       const cleanLocal = localName?.trim();
       const cleanCity = cityName?.trim();
-
+      
       let displayName;
-      if (cleanLocal && cleanCity && cleanLocal.toLowerCase() !== cleanCity.toLowerCase()) {
+      if (cleanLocal && cleanCity && cleanLocal !== cleanCity) {
+        displayName = `${cleanLocal}, ${cleanCity}`;
+      } else if (cleanLocal) {
+        displayName = cleanLocal;
+      } else if (cleanCity) {
+        // Try formatted_address for local detail
+        const fa = r.formatted_address || "";
+        const parts = fa.split(",").map(s => s.trim()).filter(s => s && s !== cleanCity && s !== stateName && s !== "India");
+        displayName = parts.length > 0 ? `${parts[0]}, ${cleanCity}` : cleanCity;
+      }
+      
+      if (displayName) {
+        const fullAddr = [cleanCity, stateName].filter(Boolean).join(", ");
+        if (setLocation(displayName, fullAddr)) return;
+      }
+    }
+  } catch(e) { console.warn("Mappls failed:", e.message); }
+
+  // Fallback to Nominatim
+  try {
+    const data = await nominatimPromise;
+    if (data) {
+      const a = data.address || {};
+      const localName = a.hamlet || a.neighbourhood || a.quarter ||
+                        a.suburb || a.road || a.residential ||
+                        a.village || a.city_district;
+      const cityName = a.city || a.town || a.municipality || a.district || "";
+      const stateName = a.state || "";
+      const cleanLocal = localName?.trim();
+      const cleanCity = cityName?.trim();
+      
+      let displayName;
+      if (cleanLocal && cleanCity && cleanLocal !== cleanCity) {
         displayName = `${cleanLocal}, ${cleanCity}`;
       } else if (cleanLocal) {
         displayName = cleanLocal;
       } else {
-        displayName = cleanCity || r.formatted_address?.split(",")[0] || "Nearby Area";
+        const parts = (data.display_name||"").split(",").map(s=>s.trim()).filter(s=>s&&s!==cleanCity&&s!=="India"&&!/^\d/.test(s));
+        displayName = parts[0] ? `${parts[0]}, ${cleanCity}` : cleanCity;
       }
-
+      
       const fullAddr = [cleanCity, stateName].filter(Boolean).join(", ");
-
-      if (nameEl) nameEl.textContent = displayName;
-      if (addrEl) addrEl.textContent = fullAddr;
-      currentLocation = { lat, lng, name: displayName, fullAddr };
-      forceEnableConfirm();
-      return; // ✅ Mappls succeeded
+      if (setLocation(displayName, fullAddr)) return;
     }
-  } catch(e) {
-    console.warn("Mappls geocode failed:", e.message, "— trying Nominatim");
+  } catch(e) { console.warn("Nominatim failed:", e.message); }
+
+  // Both failed — use map label text if visible
+  const mapLabel = document.querySelector(".mappls-label, .map-label");
+  if (mapLabel?.textContent) {
+    setLocation(mapLabel.textContent.trim(), "");
+    return;
   }
 
-  // ===== FALLBACK: NOMINATIM =====
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-      { headers: { 'Accept-Language': 'hi,en' }, signal: AbortSignal.timeout(6000) }
-    );
-    const data = await res.json();
-    const a = data.address || {};
-
-    console.log("📍 Nominatim fields:", JSON.stringify(a));
-
-    const localName =
-      a.hamlet || a.neighbourhood || a.quarter ||
-      a.suburb || a.road || a.residential ||
-      a.village || a.city_district || a.district;
-
-    const cityName = a.city || a.town || a.municipality || "";
-    const stateName = a.state || "";
-
-    const cleanLocal = localName?.trim();
-    const cleanCity = cityName?.trim();
-
-    let displayName;
-    if (cleanLocal && cleanCity && cleanLocal.toLowerCase() !== cleanCity.toLowerCase()) {
-      displayName = `${cleanLocal}, ${cleanCity}`;
-    } else if (cleanLocal) {
-      displayName = cleanLocal;
-    } else {
-      const parts = (data.display_name || "").split(",").map(s => s.trim()).filter(Boolean);
-      const filtered = parts.filter(p => p !== cleanCity && p !== stateName && p !== "India" && !/^\d/.test(p));
-      displayName = filtered.length > 0 ? `${filtered[0]}, ${cleanCity}` : (cleanCity || "Selected Location");
-    }
-
-    const fullAddr = [cleanCity, stateName].filter(Boolean).join(", ");
-
-    if (nameEl) nameEl.textContent = displayName;
-    if (addrEl) addrEl.textContent = fullAddr || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-    currentLocation = { lat, lng, name: displayName, fullAddr };
-    forceEnableConfirm();
-
-  } catch(e) {
-    console.warn("Both geocodes failed:", e.message);
-    if (nameEl) nameEl.textContent = "Location selected ✓";
-    if (addrEl) addrEl.textContent = "";
-    // Keep lat/lng but no coordinate string as name
-    if (currentLocation) {
-      currentLocation.name = "";
-      currentLocation.fullAddr = "";
-    }
-    forceEnableConfirm();
-  }
+  // Last resort — allow confirm with "Selected Area"
+  if (nameEl) nameEl.textContent = "Selected Area";
+  currentLocation = { lat, lng, name: "Selected Area", fullAddr: "" };
+  forceEnableConfirm();
 }
 
 // ===== EXPLORE TABS + NEARBY MANDIS =====
@@ -1235,78 +1228,49 @@ function confirmLocation(name) {
 
 function confirmAndProceed() {
   if (!currentLocation?.lat || !currentLocation?.lng) {
-    showToast("⚠️ Pehle map pe location select karein!");
+    showToast("⚠️ Map pe pin rakho!");
     return;
   }
 
-  // Get best available name
+  // Get name — try all sources, NEVER block the user
   const nameEl = document.getElementById("selectedLocationName");
   const addrEl = document.getElementById("selectedLocationAddress");
-  const displayName = nameEl?.textContent || "";
-  const displayAddr = addrEl?.textContent || "";
+  const shownName = nameEl?.textContent?.trim() || "";
+  const shownAddr = addrEl?.textContent?.trim() || "";
 
-  // Use displayed name if it's real (not loading/coordinate)
-  const isValidName = (n) => n && n.length > 2 &&
-    !isCoordinateString(n) &&
-    n !== "📍 Dhundh raha hai..." &&
-    n !== "Map pe location chunein..." &&
-    n !== "Location selected ✓" &&
-    n !== "Nearby Area";
+  // Best available name
+  let name = currentLocation.name || "";
+  let addr = currentLocation.fullAddr || "";
 
-  let finalPlace = "";
-  let finalAddr = "";
-
-  if (isValidName(displayName)) {
-    finalPlace = displayName;
-    finalAddr = displayAddr;
-    currentLocation.name = finalPlace;
-    currentLocation.fullAddr = finalAddr;
-  } else if (isValidName(currentLocation.name)) {
-    finalPlace = currentLocation.name;
-    finalAddr = currentLocation.fullAddr || "";
-  } else {
-    // Still loading — wait and auto retry
-    const btn = document.getElementById("confirmBtn");
-    if (btn) { btn.innerHTML = "⏳ Naam aa raha hai..."; btn.disabled = true; }
-    showToast("⏳ Location naam aa raha hai... ruko");
-    let tries = 0;
-    const wait = setInterval(() => {
-      tries++;
-      const n = document.getElementById("selectedLocationName")?.textContent || "";
-      if (isValidName(n)) {
-        clearInterval(wait);
-        if (btn) { btn.innerHTML = "📍 Confirm Location"; btn.disabled = false; }
-        confirmAndProceed();
-      } else if (tries >= 12) {
-        clearInterval(wait);
-        if (btn) { btn.innerHTML = "📍 Confirm Location"; btn.disabled = false; }
-        // Use "Nearby Area" as last resort
-        currentLocation.name = "Nearby Area";
-        currentLocation.fullAddr = "";
-        confirmAndProceed();
-      }
-    }, 500);
-    return;
+  // If geocode gave us a real name, use it
+  if (shownName && shownName !== "📍 Dhundh raha hai..." && shownName.length > 2 && !isCoordinateString(shownName)) {
+    name = shownName;
+    addr = shownAddr;
   }
 
-  // Save to localStorage
+  // If still no name, use a simple label — never block
+  if (!name || name === "📍 Dhundh raha hai..." || isCoordinateString(name)) {
+    name = "My Location";
+  }
+
+  // Update and save
+  currentLocation.name = name;
+  currentLocation.fullAddr = addr;
+
   localStorage.setItem("zenvi_location", JSON.stringify(currentLocation));
-  localStorage.setItem("zenvi_location_name", finalPlace);
-  localStorage.setItem("zenvi_location_addr", finalAddr);
-
-  // Update Firebase if logged in
-  const isLoggedIn = window.zenviAuth?.auth?.currentUser;
-  if (isLoggedIn && window.saveLocationToCloud) {
-    window.saveLocationToCloud(currentLocation);
-    showToast(`📍 ${finalPlace} saved! ☁️`);
-  } else {
-    showToast(`📍 ${finalPlace} saved!`);
-  }
+  localStorage.setItem("zenvi_location_name", name);
+  localStorage.setItem("zenvi_location_addr", addr);
 
   // Update header
   const homeAddr = document.getElementById("homeAddress");
-  if (homeAddr) homeAddr.innerText = finalPlace + (finalAddr ? `, ${finalAddr.split(",")[0]}` : "");
+  if (homeAddr) homeAddr.innerText = name + (addr ? `, ${addr.split(",")[0]}` : "");
 
+  // Cloud sync if logged in
+  if (window.zenviAuth?.auth?.currentUser && window.saveLocationToCloud) {
+    window.saveLocationToCloud(currentLocation);
+  }
+
+  showToast(`📍 ${name} saved!`);
   showPage("home");
 }
 
@@ -1980,6 +1944,7 @@ window.submitShopRegistration = async function() {
   const type    = document.getElementById("shopType")?.value;
   const address = document.getElementById("shopAddress")?.value.trim();
   const desc    = document.getElementById("shopDesc")?.value.trim();
+  const items   = document.getElementById("shopItems")?.value.trim();
 
   // Validation
   if (!name || !owner || !phone || !type || !address) {
@@ -1995,7 +1960,7 @@ window.submitShopRegistration = async function() {
   if (btn) { btn.textContent = "Submitting..."; btn.disabled = true; }
 
   const shopData = {
-    name, owner, phone, type, address, desc,
+    name, owner, phone, type, address, desc, items,
     lat: window.currentLocation?.lat || null,
     lng: window.currentLocation?.lng || null,
     registeredAt: new Date().toISOString(),
@@ -2080,25 +2045,68 @@ function renderShopsList(shops) {
     return;
   }
 
-  list.innerHTML = shops.map(s => `
-    <div class="shop-card">
-      <div class="shop-card-header">
-        <div class="shop-icon">${typeEmoji[s.type] || "🏪"}</div>
-        <div class="shop-card-info">
-          <h4>${s.name}</h4>
-          <p>${typeLabel[s.type] || "Shop"} • ${s.address}</p>
+  list.innerHTML = shops.map(s => {
+    // Calculate distance if location available
+    const userLat = window.currentLocation?.lat;
+    const userLng = window.currentLocation?.lng;
+    let distText = "";
+    if (userLat && s.lat && s.lng) {
+      const d = getDistanceKm(userLat, userLng, s.lat, s.lng);
+      distText = `${d} km away`;
+    }
+
+    // Real rating from data, or show "Rate this shop" if none
+    const rating = s.rating || null;
+    const ratingCount = s.ratingCount || 0;
+
+    // Items preview
+    const items = s.items || "";
+    const phone = s.phone?.replace(/\D/g, '') || "";
+
+    return `
+    <div class="shop-card-new" onclick="openShopDetail(${JSON.stringify(JSON.stringify(s)).slice(1,-1)})" style="cursor:pointer;">
+      <!-- Top row: icon + info + distance -->
+      <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:10px;">
+        <div class="shop-icon" style="font-size:28px;">${typeEmoji[s.type] || "🏪"}</div>
+        <div style="flex:1;">
+          <h4 style="font-size:15px;font-weight:800;margin:0 0 2px;">${s.name}</h4>
+          <p style="font-size:12px;color:var(--text3);margin:0 0 4px;">${typeLabel[s.type] || "Shop"}</p>
+          <p style="font-size:12px;color:var(--text2);margin:0;">📍 ${s.address}</p>
         </div>
+        ${distText ? `<span style="font-size:11px;font-weight:700;color:var(--primary);background:var(--primary-glow);padding:3px 8px;border-radius:20px;white-space:nowrap;">${distText}</span>` : ""}
       </div>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:8px;">👤 ${s.owner}</div>
-      <div class="shop-card-footer">
-        <button class="shop-call-btn" onclick="window.open('tel:${s.phone}')">
-          <span class="material-icons-round" style="font-size:16px;">call</span> Call
-        </button>
-        <button class="shop-call-btn" style="background:#dbeafe;color:#3b82f6;" onclick="window.open('https://wa.me/${s.phone.replace(/\D/g,'')}')">
+
+      <!-- Rating row -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+        ${rating 
+          ? `<span style="background:#fef3c7;color:#f59e0b;font-size:12px;font-weight:700;padding:3px 8px;border-radius:6px;">⭐ ${rating} (${ratingCount})</span>`
+          : `<span style="background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:700;">☆ Rate</span>`
+        }
+        <span style="font-size:12px;color:var(--text3);">👤 ${s.owner}</span>
+        <span style="font-size:12px;color:var(--text3);">${new Date(s.registeredAt || Date.now()).toLocaleDateString('hi-IN')}</span>
+      </div>
+
+      ${items ? `<p style="font-size:12px;color:var(--text2);margin-bottom:10px;padding:8px;background:var(--bg);border-radius:8px;">🛒 ${items}</p>` : ""}
+
+      <!-- Action buttons -->
+      <div style="display:flex;gap:8px;" onclick="event.stopPropagation()">
+        ${s.lat && s.lng ? `
+        <button onclick="window.open('https://maps.google.com/?q=${s.lat},${s.lng}', '_blank')"
+          style="flex:1;padding:10px;background:#f0fdf4;color:var(--primary);border:1.5px solid #bbf7d0;
+          border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;
+          display:flex;align-items:center;justify-content:center;gap:6px;">
+          <span class="material-icons-round" style="font-size:16px;">map</span> Map
+        </button>` : ""}
+        ${phone ? `
+        <button onclick="window.open('https://wa.me/${phone}?text=Hi, I found your shop on Zenvi app!', '_blank')"
+          style="flex:2;padding:10px;background:#dcfce7;color:#16a34a;border:1.5px solid #bbf7d0;
+          border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;
+          display:flex;align-items:center;justify-content:center;gap:6px;">
           💬 WhatsApp
-        </button>
+        </button>` : ""}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 // loadShopsList on shops page open is handled in showPage directly
@@ -2309,3 +2317,350 @@ function openAboutModal() {
   modal.style.display = "flex";
   modal.onclick = e => { if (e.target === modal) modal.style.display = "none"; };
 }
+
+// ===== ADD NEW ITEM MODAL =====
+window.openAddItemModal = function() {
+  let modal = document.getElementById("addItemModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "addItemModal";
+    document.body.appendChild(modal);
+  }
+
+  modal.style.cssText = "position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.5);display:flex;align-items:flex-end;";
+
+  modal.innerHTML = `
+    <div style="background:white;width:100%;border-radius:24px 24px 0 0;padding:24px 20px 40px;">
+      <div style="width:40px;height:4px;background:#e2e8f0;border-radius:99px;margin:0 auto 20px;"></div>
+      <h3 style="font-size:17px;font-weight:800;margin-bottom:4px;">➕ Naya Item Add Karein</h3>
+      <p style="font-size:13px;color:#64748b;margin-bottom:20px;">Jo item list mein nahi hai, uska rate add karein</p>
+
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px;font-weight:700;color:#64748b;display:block;margin-bottom:6px;">ITEM KA NAAM *</label>
+        <input id="newItemName" type="text" placeholder="e.g. Arbi, Jackfruit, Jowar..."
+          style="width:100%;padding:12px 14px;border:1.5px solid #e2e8f0;border-radius:10px;
+          font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;">
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px;font-weight:700;color:#64748b;display:block;margin-bottom:6px;">PRICE (₹/kg) *</label>
+        <div style="display:flex;align-items:center;gap:8px;border:1.5px solid #e2e8f0;border-radius:10px;padding:12px 14px;">
+          <span style="font-size:18px;font-weight:800;color:#16a34a;">₹</span>
+          <input id="newItemPrice" type="number" min="1" max="10000" placeholder="0.00"
+            style="flex:1;border:none;outline:none;font-size:18px;font-weight:700;font-family:inherit;">
+          <span style="color:#64748b;">/kg</span>
+        </div>
+      </div>
+
+      <div style="margin-bottom:20px;">
+        <label style="font-size:12px;font-weight:700;color:#64748b;display:block;margin-bottom:6px;">CATEGORY</label>
+        <select id="newItemCategory" style="width:100%;padding:12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;font-family:inherit;outline:none;">
+          <option value="Vegetables">🥬 Sabji</option>
+          <option value="Fruits">🍎 Phal</option>
+          <option value="Grains">🌾 Anaaj</option>
+          <option value="Spices">🌶️ Masale</option>
+          <option value="Others">✨ Others</option>
+        </select>
+      </div>
+
+      <div style="display:flex;gap:10px;">
+        <button onclick="document.getElementById('addItemModal').style.display='none';"
+          style="flex:1;padding:14px;background:#f1f5f9;color:#64748b;border:none;border-radius:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+          Cancel
+        </button>
+        <button onclick="saveNewItem()"
+          style="flex:2;padding:14px;background:#16a34a;color:white;border:none;border-radius:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+          ✅ Add Item
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.style.display = "flex";
+  modal.onclick = e => { if (e.target === modal) modal.style.display = "none"; };
+  setTimeout(() => document.getElementById("newItemName")?.focus(), 300);
+};
+
+window.saveNewItem = function() {
+  const name  = document.getElementById("newItemName")?.value.trim();
+  const price = document.getElementById("newItemPrice")?.value;
+  const cat   = document.getElementById("newItemCategory")?.value;
+
+  if (!name) { showToast("⚠️ Item ka naam daalen!"); return; }
+  if (!price || isNaN(price) || price <= 0) { showToast("⚠️ Valid price daalen!"); return; }
+
+  // Check if already exists
+  const exists = marketData.find(i => i.name.toLowerCase() === name.toLowerCase());
+  if (exists) { showToast(`⚠️ "${name}" already list mein hai — ₹${exists.price}/kg`); return; }
+
+  // Add to marketData
+  const newItem = {
+    name, price: parseFloat(price).toFixed(2),
+    unit: "kg", category: cat,
+    trend: "stable", emoji: getEmoji(name),
+    source: "user", minPrice: parseFloat(price), maxPrice: parseFloat(price), hasRange: false
+  };
+  marketData.push(newItem);
+  marketData.sort((a,b) => a.name.localeCompare(b.name));
+  renderItems(marketData);
+
+  // Also suggest to community
+  if (window.submitPriceSuggestion) {
+    window.submitPriceSuggestion(name, price, window.currentLocation?.name);
+  }
+
+  document.getElementById("addItemModal").style.display = "none";
+  showToast(`✅ "${name}" added at ₹${price}/kg!`);
+};
+
+// ===== RATE SHOP MODAL =====
+window.openRateShop = function(shopId, shopName) {
+  const user = window.zenviAuth?.auth?.currentUser;
+  if (!user) {
+    showToast("⚠️ Rating dene ke liye login karein");
+    return;
+  }
+
+  let modal = document.getElementById("rateShopModal");
+  if (!modal) { modal = document.createElement("div"); modal.id = "rateShopModal"; document.body.appendChild(modal); }
+
+  let selectedStars = 0;
+
+  modal.style.cssText = "position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.5);display:flex;align-items:flex-end;";
+  modal.innerHTML = `
+    <div style="background:white;width:100%;border-radius:24px 24px 0 0;padding:24px 20px 40px;">
+      <div style="width:40px;height:4px;background:#e2e8f0;border-radius:99px;margin:0 auto 20px;"></div>
+      <h3 style="font-size:17px;font-weight:800;text-align:center;margin-bottom:4px;">Rate this Shop</h3>
+      <p style="font-size:14px;color:#64748b;text-align:center;margin-bottom:24px;">${shopName}</p>
+
+      <!-- Star selector -->
+      <div style="display:flex;justify-content:center;gap:12px;margin-bottom:24px;" id="starRow">
+        ${[1,2,3,4,5].map(n => `
+          <span onclick="selectStar(${n})" id="star${n}"
+            style="font-size:40px;cursor:pointer;opacity:0.3;transition:all 0.15s;">★</span>
+        `).join('')}
+      </div>
+
+      <p id="ratingLabel" style="text-align:center;font-size:14px;color:#94a3b8;margin-bottom:20px;">
+        Star select karein
+      </p>
+
+      <textarea id="ratingComment" placeholder="Optional: Kuch likhein is dukaan ke baare mein..."
+        rows="3" style="width:100%;padding:12px;border:1.5px solid #e2e8f0;border-radius:10px;
+        font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;margin-bottom:16px;resize:none;"></textarea>
+
+      <div style="display:flex;gap:10px;">
+        <button onclick="document.getElementById('rateShopModal').style.display='none';"
+          style="flex:1;padding:14px;background:#f1f5f9;color:#64748b;border:none;border-radius:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+          Cancel
+        </button>
+        <button onclick="submitShopRating('${shopId}', '${shopName}')"
+          style="flex:2;padding:14px;background:#16a34a;color:white;border:none;border-radius:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+          ⭐ Submit Rating
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.style.display = "flex";
+  modal.onclick = e => { if (e.target === modal) modal.style.display = "none"; };
+};
+
+const ratingLabels = ["", "Bahut Bura 😞", "Theek Nahi 😐", "Theek Hai 🙂", "Acha Hai 😊", "Bahut Acha! 🤩"];
+
+window.selectStar = function(n) {
+  for (let i = 1; i <= 5; i++) {
+    const el = document.getElementById(`star${i}`);
+    if (el) el.style.opacity = i <= n ? "1" : "0.3";
+  }
+  const label = document.getElementById("ratingLabel");
+  if (label) label.textContent = ratingLabels[n];
+  window._selectedStars = n;
+};
+
+window.submitShopRating = async function(shopId, shopName) {
+  const stars = window._selectedStars || 0;
+  if (!stars) { showToast("⚠️ Pehle stars select karein!"); return; }
+
+  const comment = document.getElementById("ratingComment")?.value.trim();
+  const user = window.zenviAuth?.auth?.currentUser;
+
+  // Save to localStorage
+  const ratings = JSON.parse(localStorage.getItem("zenvi_shop_ratings") || "{}");
+  if (!ratings[shopId]) ratings[shopId] = { total: 0, count: 0 };
+  ratings[shopId].total += stars;
+  ratings[shopId].count += 1;
+  ratings[shopId].avg = (ratings[shopId].total / ratings[shopId].count).toFixed(1);
+  localStorage.setItem("zenvi_shop_ratings", JSON.stringify(ratings));
+
+  // Update shop in localStorage
+  const shops = JSON.parse(localStorage.getItem("zenvi_shops") || "[]");
+  const shop = shops.find(s => s.id === shopId || s.name === shopName);
+  if (shop) {
+    shop.rating = ratings[shopId].avg;
+    shop.ratingCount = ratings[shopId].count;
+    localStorage.setItem("zenvi_shops", JSON.stringify(shops));
+  }
+
+  // Save to Firebase
+  if (window.zenviDB) {
+    try {
+      const { addDoc, collection, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+      await addDoc(collection(window.zenviDB, "shop_ratings"), {
+        shopId, shopName, stars, comment,
+        userId: user?.uid, userName: user?.displayName,
+        createdAt: serverTimestamp()
+      });
+    } catch(e) { console.warn("Rating Firebase save:", e.message); }
+  }
+
+  document.getElementById("rateShopModal").style.display = "none";
+  window._selectedStars = 0;
+  showToast(`⭐ Rating submit ho gayi! ${stars}/5 stars`);
+  setTimeout(loadShopsList, 500); // Refresh list
+};
+
+// ===== SHOP DETAIL PAGE =====
+window.openShopDetail = function(shopJson) {
+  let s;
+  try { s = typeof shopJson === "string" ? JSON.parse(shopJson) : shopJson; }
+  catch(e) { showToast("Error loading shop"); return; }
+
+  const typeEmoji = { sabji:"🥬", phal:"🍎", kirana:"🛒", anaaj:"🌾", dairy:"🥛", mandi:"🏪", other:"✨" };
+  const phone = s.phone?.replace(/\D/g,'') || "";
+
+  // Parse items with prices from items string
+  // Format: "Tomato-20, Potato-15" or just "Tomato, Potato"
+  const itemsList = [];
+  if (s.items) {
+    s.items.split(",").forEach(item => {
+      const parts = item.trim().split(/[-:]/);
+      const name = parts[0]?.trim();
+      const price = parts[1]?.trim();
+      if (name) {
+        // Try to find price in marketData
+        const marketItem = marketData.find(m => m.name.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(m.name.toLowerCase()));
+        itemsList.push({
+          name,
+          price: price || marketItem?.price || null,
+          emoji: marketItem?.emoji || "🌱",
+          trend: marketItem?.trend || "stable"
+        });
+      }
+    });
+  }
+
+  const trendIcon = { up:"📈", down:"📉", stable:"➡️" };
+
+  let modal = document.getElementById("shopDetailModal");
+  if (!modal) { modal = document.createElement("div"); modal.id = "shopDetailModal"; document.body.appendChild(modal); }
+
+  modal.style.cssText = "position:fixed;inset:0;z-index:3000;background:white;overflow-y:auto;";
+  modal.innerHTML = `
+    <!-- Header -->
+    <div style="background:linear-gradient(135deg,#15803d,#16a34a);padding:20px 16px 24px;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+        <button onclick="document.getElementById('shopDetailModal').style.display='none';"
+          style="background:rgba(255,255,255,0.2);border:none;border-radius:50%;width:36px;height:36px;
+          cursor:pointer;display:flex;align-items:center;justify-content:center;">
+          <span class="material-icons-round" style="color:white;font-size:20px;">arrow_back</span>
+        </button>
+        <h2 style="color:white;font-size:18px;font-weight:800;flex:1;margin:0;">Shop Details</h2>
+      </div>
+      
+      <div style="display:flex;gap:14px;align-items:center;">
+        <div style="width:64px;height:64px;background:rgba(255,255,255,0.2);border-radius:16px;
+          display:flex;align-items:center;justify-content:center;font-size:32px;flex-shrink:0;">
+          ${typeEmoji[s.type] || "🏪"}
+        </div>
+        <div>
+          <h3 style="color:white;font-size:20px;font-weight:800;margin:0 0 4px;">${s.name}</h3>
+          <p style="color:rgba(255,255,255,0.8);font-size:13px;margin:0 0 4px;">
+            ${s.type === "sabji" ? "Sabji Bhandar" : s.type === "phal" ? "Phal Bhandar" : s.type === "kirana" ? "Kirana Store" : s.type === "anaaj" ? "Anaaj/Dal" : s.type === "dairy" ? "Dairy" : s.type === "mandi" ? "Mandi" : "Shop"}
+          </p>
+          ${s.rating ? `<span style="background:rgba(255,255,255,0.2);color:white;font-size:12px;font-weight:700;padding:2px 8px;border-radius:20px;">⭐ ${s.rating} (${s.ratingCount || 0} ratings)</span>` : ""}
+        </div>
+      </div>
+    </div>
+
+    <div style="padding:16px;">
+
+      <!-- Info card -->
+      <div style="background:#f8fafc;border-radius:14px;padding:14px;margin-bottom:16px;">
+        <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">
+          <span class="material-icons-round" style="color:#16a34a;font-size:18px;margin-top:2px;">location_on</span>
+          <p style="font-size:14px;font-weight:600;color:#1e293b;margin:0;">${s.address}</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span class="material-icons-round" style="color:#16a34a;font-size:18px;">person</span>
+          <p style="font-size:14px;color:#475569;margin:0;">Owner: <strong>${s.owner}</strong></p>
+        </div>
+        ${s.desc ? `<div style="display:flex;align-items:flex-start;gap:10px;">
+          <span class="material-icons-round" style="color:#16a34a;font-size:18px;">info</span>
+          <p style="font-size:13px;color:#64748b;margin:0;">${s.desc}</p>
+        </div>` : ""}
+      </div>
+
+      <!-- Items & Prices -->
+      <h4 style="font-size:15px;font-weight:800;color:#1e293b;margin:0 0 12px;">
+        🛒 Items & Prices
+      </h4>
+
+      ${itemsList.length > 0 ? `
+        <div style="background:white;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden;margin-bottom:16px;">
+          ${itemsList.map((item, i) => `
+            <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;
+              ${i < itemsList.length-1 ? 'border-bottom:1px solid #f1f5f9;' : ''}">
+              <span style="font-size:22px;">${item.emoji}</span>
+              <div style="flex:1;">
+                <p style="font-size:14px;font-weight:700;color:#1e293b;margin:0;">${item.name}</p>
+                <p style="font-size:11px;color:#94a3b8;margin:0;">Mandi rate</p>
+              </div>
+              ${item.price 
+                ? `<div style="text-align:right;">
+                    <p style="font-size:16px;font-weight:800;color:#16a34a;margin:0;">₹${item.price}</p>
+                    <p style="font-size:10px;color:#94a3b8;margin:0;">/kg ${trendIcon[item.trend]||""}</p>
+                  </div>`
+                : `<span style="font-size:12px;color:#94a3b8;">Price N/A</span>`
+              }
+            </div>
+          `).join('')}
+        </div>
+      ` : `
+        <div style="background:#f8fafc;border-radius:14px;padding:24px;text-align:center;margin-bottom:16px;">
+          <p style="font-size:32px;margin:0 0 8px;">🌱</p>
+          <p style="font-size:14px;color:#64748b;margin:0;">Is dukaan ne abhi items list nahi kiye.</p>
+          <p style="font-size:12px;color:#94a3b8;margin-top:4px;">WhatsApp pe poochein</p>
+        </div>
+      `}
+
+      <!-- Action buttons -->
+      <div style="display:flex;gap:10px;margin-bottom:16px;">
+        ${s.lat && s.lng ? `
+        <button onclick="window.open('https://maps.google.com/?q=${s.lat},${s.lng}', '_blank')"
+          style="flex:1;padding:14px;background:#f0fdf4;color:#16a34a;border:1.5px solid #bbf7d0;
+          border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;
+          display:flex;align-items:center;justify-content:center;gap:6px;">
+          <span class="material-icons-round" style="font-size:18px;">map</span> Map
+        </button>` : ""}
+        ${phone ? `
+        <button onclick="window.open('https://wa.me/${phone}?text=Hi! Zenvi app se aapki dukaan dekhi. Items aur price batayein please.', '_blank')"
+          style="flex:2;padding:14px;background:#16a34a;color:white;border:none;
+          border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;
+          display:flex;align-items:center;justify-content:center;gap:6px;">
+          💬 WhatsApp
+        </button>` : ""}
+      </div>
+
+      <!-- Rate this shop -->
+      <button onclick="openRateShop('${s.id || s.name}', '${s.name}')"
+        style="width:100%;padding:14px;background:white;color:#f59e0b;border:2px solid #fde68a;
+        border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">
+        ⭐ Rate this Shop
+      </button>
+
+    </div>
+  `;
+
+  modal.style.display = "block";
+};

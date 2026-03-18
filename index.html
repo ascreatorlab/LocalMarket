@@ -84,7 +84,12 @@
   <!-- Items Grid -->
   <div class="section-header">
     <h3>Market Rates</h3>
-    <span class="refresh-btn" id="refreshBtn"><span class="material-icons-round">refresh</span></span>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button onclick="openAddItemModal()" style="display:flex;align-items:center;gap:4px;padding:6px 12px;background:var(--primary);color:white;border:none;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+        <span class="material-icons-round" style="font-size:14px;">add</span> Add Item
+      </button>
+      <span class="refresh-btn" id="refreshBtn"><span class="material-icons-round">refresh</span></span>
+    </div>
   </div>
   <div class="items-grid" id="itemsGrid" role="list"></div>
 </div>
@@ -222,8 +227,12 @@
         </button>
       </div>
       <div class="form-group">
+        <label>Main Items (Optional)</label>
+        <input type="text" id="shopItems" placeholder="e.g. Tomato, Potato, Onion, Wheat">
+      </div>
+      <div class="form-group">
         <label>Description (Optional)</label>
-        <textarea id="shopDesc" placeholder="Aapki dukaan ke baare mein kuch batayein..." rows="3"></textarea>
+        <textarea id="shopDesc" placeholder="Aapki dukaan ke baare mein kuch batayein..." rows="2"></textarea>
       </div>
 
       <button class="submit-shop-btn" onclick="submitShopRegistration()">
