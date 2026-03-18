@@ -398,13 +398,12 @@ document.addEventListener("DOMContentLoaded", () => {
 console.log("🔐 Firebase config loaded ✅");
 
 // ===== SHOP SAVE/LOAD (Permanent Firebase Storage) =====
-import {
-  collection as fbCollection,
-  addDoc as fbAddDoc,
-  getDocs as fbGetDocs,
-  query as fbQuery,
-  orderBy as fbOrderBy
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+// Using already-imported Firestore functions (fbCollection = collection, etc.)
+const fbCollection = collection;
+const fbAddDoc = addDoc;
+const fbGetDocs = getDocs;
+const fbQuery = query;
+const fbOrderBy = orderBy;
 
 // Save shop permanently to Firestore
 window.saveShopToFirebase = async function(shopData) {

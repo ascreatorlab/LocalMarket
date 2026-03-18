@@ -1335,9 +1335,18 @@ function confirmAndProceed() {
       if (isValid(n) || isValid(cn) || tries >= 12) {
         clearInterval(iv);
         if (btn) { btn.innerHTML = "📍 Confirm Location"; btn.disabled = false; }
+        // Update currentLocation with whatever we have now
+        if (isValid(n) && !isValid(currentLocation?.name)) currentLocation.name = n;
         confirmAndProceed();
       }
     }, 500);
+    // Safety: always re-enable button after 8 seconds no matter what
+    setTimeout(() => {
+      if (btn && btn.disabled) {
+        btn.innerHTML = "📍 Confirm Location";
+        btn.disabled = false;
+      }
+    }, 8000);
     return;
   }
 
@@ -1369,7 +1378,29 @@ function confirmAndProceed() {
     window.saveLocationToCloud(currentLocation);
   }
 
+  // Offer to save as Home if not already saved
+  const saved = JSON.parse(localStorage.getItem("zenvi_saved_addresses") || "[]");
+  const hasHome = saved.some(a => a.label === "Home");
+  
   showToast(`📍 ${name} saved!`);
+  
+  if (!hasHome && name && name !== "My Location") {
+    setTimeout(() => {
+      const saveModal = document.createElement("div");
+      saveModal.style.cssText = "position:fixed;bottom:110px;left:16px;right:16px;z-index:2000;background:#1e293b;color:white;border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:10px;";
+      saveModal.innerHTML = `
+        <span style="font-size:20px;">🏠</span>
+        <p style="flex:1;font-size:13px;font-weight:600;margin:0;">"${name}" ko Home save karein?</p>
+        <button onclick="saveAsAddress('Home');this.parentElement.remove();" 
+          style="background:#16a34a;color:white;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Save</button>
+        <button onclick="this.parentElement.remove();"
+          style="background:rgba(255,255,255,0.1);color:white;border:none;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;">✕</button>
+      `;
+      document.body.appendChild(saveModal);
+      setTimeout(() => saveModal.remove(), 6000);
+    }, 1500);
+  }
+  
   showPage("home");
 }
 
@@ -1585,7 +1616,17 @@ function setupEvents() {
   });
 
   // Location section
-  document.getElementById("locationSection")?.addEventListener("click", () => openLocationSelector());
+  document.getElementById("locationSection")?.addEventListener("click", () => {
+    // If already have saved addresses, show selector
+    const saved = JSON.parse(localStorage.getItem("zenvi_saved_addresses") || "[]");
+    if (saved.length > 0) {
+      openLocationSelector();
+    } else {
+      // First time — go directly to map
+      showPage("explore");
+      setTimeout(() => window.switchExploreTab?.("location"), 200);
+    }
+  });
   document.getElementById("profileIcon")?.addEventListener("click", () => showPage("profile"));
   document.getElementById("backBtn")?.addEventListener("click", () => showPage("home"));
   document.getElementById("confirmBtn")?.addEventListener("click", confirmAndProceed);
@@ -2767,4 +2808,221 @@ window.openShopDetail = function(shopJson) {
   `;
 
   modal.style.display = "block";
+};
+
+// ===== SWIGGY-STYLE LOCATION SELECTOR =====
+function openLocationSelector() {
+  let modal = document.getElementById("locationSelectorModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "locationSelectorModal";
+    document.body.appendChild(modal);
+  }
+
+  // Get saved addresses
+  const saved = JSON.parse(localStorage.getItem("zenvi_saved_addresses") || "[]");
+  const current = JSON.parse(localStorage.getItem("zenvi_location") || "{}");
+  const currentName = localStorage.getItem("zenvi_location_name") || "";
+
+  // Distance helper
+  function distText(addr) {
+    if (!addr.lat || !addr.lng || !current.lat) return "";
+    const d = getDistanceKm(current.lat, current.lng, addr.lat, addr.lng);
+    return `${d} km`;
+  }
+
+  modal.style.cssText = "position:fixed;inset:0;z-index:3000;background:white;overflow-y:auto;";
+  modal.innerHTML = `
+    <!-- Header -->
+    <div style="display:flex;align-items:center;gap:12px;padding:16px;border-bottom:1px solid #f1f5f9;position:sticky;top:0;background:white;z-index:1;">
+      <button onclick="document.getElementById('locationSelectorModal').style.display='none';"
+        style="background:none;border:none;cursor:pointer;padding:4px;">
+        <span class="material-icons-round" style="font-size:22px;">arrow_back</span>
+      </button>
+      <h2 style="font-size:17px;font-weight:800;margin:0;">Select Your Location</h2>
+    </div>
+
+    <!-- Search -->
+    <div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;">
+      <div style="display:flex;align-items:center;gap:10px;background:#f8fafc;border-radius:12px;padding:12px 14px;border:1px solid #e2e8f0;">
+        <span class="material-icons-round" style="color:#94a3b8;font-size:20px;">search</span>
+        <input id="locSelectorSearch" placeholder="Search an area or address" 
+          style="border:none;outline:none;font-size:14px;font-family:inherit;background:transparent;flex:1;"
+          oninput="locSelectorSearch(this.value)">
+      </div>
+    </div>
+
+    <!-- Quick actions -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 16px;border-bottom:1px solid #f1f5f9;">
+      <button onclick="useCurrentLocationNow()" 
+        style="display:flex;align-items:center;gap:10px;padding:14px;background:#fff7ed;border:1.5px solid #fed7aa;border-radius:12px;cursor:pointer;font-family:inherit;">
+        <span style="width:36px;height:36px;background:#ea580c;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+          <span class="material-icons-round" style="color:white;font-size:18px;">my_location</span>
+        </span>
+        <span style="font-size:13px;font-weight:700;color:#ea580c;text-align:left;">Use Current<br>Location</span>
+      </button>
+      <button onclick="document.getElementById('locationSelectorModal').style.display='none'; showPage('explore');"
+        style="display:flex;align-items:center;gap:10px;padding:14px;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:12px;cursor:pointer;font-family:inherit;">
+        <span style="width:36px;height:36px;background:#16a34a;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+          <span class="material-icons-round" style="color:white;font-size:18px;">add_location</span>
+        </span>
+        <span style="font-size:13px;font-weight:700;color:#16a34a;text-align:left;">Set on<br>Map</span>
+      </button>
+    </div>
+
+    <!-- Saved addresses -->
+    ${saved.length > 0 ? `
+    <div style="padding:14px 16px 6px;">
+      <p style="font-size:11px;font-weight:800;color:#94a3b8;letter-spacing:0.8px;margin:0 0 10px;">SAVED ADDRESSES</p>
+      ${saved.map((addr, i) => `
+        <div onclick="selectSavedAddress(${i})" 
+          style="display:flex;align-items:center;gap:14px;padding:14px;border-radius:12px;cursor:pointer;
+          margin-bottom:6px;border:1.5px solid ${addr.name === currentName ? '#16a34a' : '#f1f5f9'};
+          background:${addr.name === currentName ? '#f0fdf4' : 'white'};">
+          <div style="width:44px;height:44px;background:${addr.label==='Home'?'#f0fdf4':addr.label==='Office'?'#eff6ff':'#f8fafc'};
+            border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <span class="material-icons-round" style="font-size:20px;color:${addr.label==='Home'?'#16a34a':addr.label==='Office'?'#3b82f6':'#64748b'};">
+              ${addr.label==='Home'?'home':addr.label==='Office'?'business':'location_on'}
+            </span>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">
+              <p style="font-size:14px;font-weight:800;margin:0;color:#1e293b;">${addr.label || "Saved"}</p>
+              ${addr.name === currentName ? '<span style="background:#16a34a;color:white;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">SELECTED</span>' : ""}
+            </div>
+            <p style="font-size:12px;color:#64748b;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${addr.fullAddr || addr.name}</p>
+          </div>
+          ${distText(addr) ? `<span style="font-size:11px;font-weight:700;color:#94a3b8;flex-shrink:0;">${distText(addr)}</span>` : ""}
+        </div>
+      `).join('')}
+    </div>` : `
+    <div style="padding:24px 16px;text-align:center;color:#94a3b8;">
+      <span style="font-size:40px;">📍</span>
+      <p style="font-size:14px;margin:8px 0 0;">No saved addresses yet</p>
+    </div>`}
+
+    <!-- Search results container -->
+    <div id="locSelectorResults" style="padding:0 16px 20px;"></div>
+  `;
+
+  modal.style.display = "block";
+  setTimeout(() => document.getElementById("locSelectorSearch")?.focus(), 400);
+}
+
+// Use device GPS location
+window.useCurrentLocationNow = function() {
+  document.getElementById("locationSelectorModal").style.display = "none";
+  if (!navigator.geolocation) { showToast("⚠️ GPS not supported"); return; }
+  showToast("📡 GPS se location dhundh raha hai...");
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      currentLocation = { lat, lng, name: "", fullAddr: "" };
+
+      // Reverse geocode
+      try {
+        const res = await fetch(`https://apis.mappls.com/advancedmaps/v1/${MAPPLS_API_KEY}/rev_geocode?lat=${lat}&lng=${lng}`, { signal: AbortSignal.timeout(5000) });
+        const data = await res.json();
+        if (data?.results?.length > 0) {
+          const r = data.results[0];
+          const local = r.subSubLocality || r.subLocality || r.locality || r.village || r.area || "";
+          const city = r.city || r.district || "";
+          const name = local && city ? `${local}, ${city}` : (local || city || "Current Location");
+          const addr = [city, r.state].filter(Boolean).join(", ");
+          currentLocation = { lat, lng, name, fullAddr: addr };
+          saveFinalLocation(name, addr);
+        }
+      } catch {
+        // Nominatim fallback
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`);
+          const data = await res.json();
+          const a = data.address || {};
+          const local = a.hamlet || a.neighbourhood || a.suburb || a.village || "";
+          const city = a.city || a.town || a.district || "";
+          const name = local && city ? `${local}, ${city}` : (local || city || "Current Location");
+          const addr = [city, a.state].filter(Boolean).join(", ");
+          currentLocation = { lat, lng, name, fullAddr: addr };
+          saveFinalLocation(name, addr);
+        } catch {
+          saveFinalLocation("Current Location", "");
+        }
+      }
+    },
+    () => showToast("❌ GPS permission denied"),
+    { timeout: 10000 }
+  );
+};
+
+function saveFinalLocation(name, addr) {
+  currentLocation.name = name;
+  currentLocation.fullAddr = addr;
+  localStorage.setItem("zenvi_location", JSON.stringify(currentLocation));
+  localStorage.setItem("zenvi_location_name", name);
+  localStorage.setItem("zenvi_location_addr", addr);
+  const homeAddr = document.getElementById("homeAddress");
+  if (homeAddr) homeAddr.innerText = name + (addr && !addr.includes(name) ? `, ${addr.split(",")[0]}` : "");
+  if (window.zenviAuth?.auth?.currentUser && window.saveLocationToCloud) window.saveLocationToCloud(currentLocation);
+  showToast(`📍 ${name}`);
+}
+
+// Select from saved list
+window.selectSavedAddress = function(idx) {
+  const saved = JSON.parse(localStorage.getItem("zenvi_saved_addresses") || "[]");
+  const addr = saved[idx];
+  if (!addr) return;
+  currentLocation = { lat: addr.lat, lng: addr.lng, name: addr.name, fullAddr: addr.fullAddr || "" };
+  saveFinalLocation(addr.name, addr.fullAddr || "");
+  document.getElementById("locationSelectorModal").style.display = "none";
+};
+
+// Search in location selector
+let locSearchTimer = null;
+window.locSelectorSearch = function(query) {
+  clearTimeout(locSearchTimer);
+  if (!query.trim()) {
+    document.getElementById("locSelectorResults").innerHTML = "";
+    return;
+  }
+  locSearchTimer = setTimeout(async () => {
+    const box = document.getElementById("locSelectorResults");
+    if (!box) return;
+    box.innerHTML = '<p style="font-size:13px;color:#94a3b8;padding:8px 0;">Dhundh raha hai...</p>';
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=in&limit=5&addressdetails=1`);
+      const results = await res.json();
+      if (!results.length) { box.innerHTML = '<p style="font-size:13px;color:#94a3b8;padding:8px 0;">Koi result nahi mila</p>'; return; }
+      box.innerHTML = '<p style="font-size:11px;font-weight:800;color:#94a3b8;letter-spacing:0.8px;margin:0 0 8px;">SEARCH RESULTS</p>' +
+        results.map(r => {
+          const parts = r.display_name.split(",").map(s=>s.trim());
+          const main = parts[0];
+          const sub = parts.slice(1, 3).join(", ");
+          return `<div onclick="selectSearchResult(${r.lat}, ${r.lon}, '${main.replace(/'/g,"\\'")}', '${sub.replace(/'/g,"\\'")}', '${r.display_name.replace(/'/g,"\\'")}' )"
+            style="display:flex;align-items:center;gap:12px;padding:12px;border-radius:10px;cursor:pointer;border-bottom:1px solid #f1f5f9;">
+            <span class="material-icons-round" style="color:#16a34a;font-size:20px;">location_on</span>
+            <div><p style="font-size:14px;font-weight:700;margin:0;color:#1e293b;">${main}</p>
+            <p style="font-size:12px;color:#64748b;margin:0;">${sub}</p></div>
+          </div>`;
+        }).join('');
+    } catch { box.innerHTML = '<p style="font-size:13px;color:#94a3b8;">Search failed</p>'; }
+  }, 400);
+};
+
+window.selectSearchResult = function(lat, lng, name, addr, fullAddr) {
+  currentLocation = { lat: parseFloat(lat), lng: parseFloat(lng), name, fullAddr: addr };
+  saveFinalLocation(name, addr);
+  document.getElementById("locationSelectorModal").style.display = "none";
+};
+
+// Save current location as Home/Office
+window.saveAsAddress = function(label) {
+  if (!currentLocation?.lat) { showToast("⚠️ Pehle location set karein"); return; }
+  const saved = JSON.parse(localStorage.getItem("zenvi_saved_addresses") || "[]");
+  const existing = saved.findIndex(a => a.label === label);
+  const entry = { label, ...currentLocation };
+  if (existing >= 0) saved[existing] = entry;
+  else saved.push(entry);
+  localStorage.setItem("zenvi_saved_addresses", JSON.stringify(saved));
+  showToast(`✅ ${label} address saved!`);
 };
