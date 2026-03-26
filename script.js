@@ -976,6 +976,9 @@ async function reverseGeocode(lat, lng) {
     if (addrEl) addrEl.textContent = fullAddr || "";
     currentLocation = { lat, lng, name: displayName, fullAddr: fullAddr || "" };
     forceEnableConfirm();
+    // Update confirm button text with location name
+    const btn = document.getElementById("confirmBtn");
+    if (btn) btn.innerHTML = `📍 Confirm — ${displayName.split(",")[0]}`;
     return true;
   }
 
@@ -1349,72 +1352,31 @@ function confirmAndProceed() {
 
   const good = n => n && n.length > 2 && !SKIP.has(n) && !isCoordinateString(n);
 
-  // Use best available name — NEVER block
-  let name = good(shown) ? shown
-    : good(currentLocation.name) ? currentLocation.name
-    : null;
+  let name = good(shown) ? shown : good(currentLocation.name) ? currentLocation.name : "";
+  let addr = !SKIP.has(shownAddr) ? shownAddr : (currentLocation.fullAddr || "");
 
-  // If geocode not done yet, use map label text if visible
-  if (!name) {
-    const mapLabels = document.querySelectorAll(".mapboxgl-popup-content, .mappls-label, [class*='label']");
-    mapLabels.forEach(el => { if (!name && good(el.textContent?.trim())) name = el.textContent.trim(); });
-  }
-
-  // Last resort: use lat/lng area — still save and go home
-  if (!name) {
-    name = "Selected Location";
-  }
-
-  const addr = !SKIP.has(shownAddr) ? shownAddr : (currentLocation.fullAddr || "");
+  if (!name) name = "Selected Location";
 
   currentLocation.name = name;
   currentLocation.fullAddr = addr;
-  localStorage.setItem("zenvi_location", JSON.stringify(currentLocation));
-  localStorage.setItem("zenvi_location_name", name);
-  localStorage.setItem("zenvi_location_addr", addr);
 
-  // Update header
-  const homeAddrEl = document.getElementById("homeAddress");
-  if (homeAddrEl) {
-    homeAddrEl.innerText = (addr && !addr.includes(name))
-      ? name + ", " + addr.split(",")[0]
-      : name;
-  }
-  const locLabel = document.getElementById("locLabel");
-  if (locLabel) locLabel.textContent = "📍 Location";
+  // Show address details form (Swiggy/Zomato style)
+  // This lets user add house no, landmark, save as Home/Work
+  showAddressDetailsForm(name, addr);
+}
 
-  if (window.zenviAuth?.auth?.currentUser && window.saveLocationToCloud) {
-    window.saveLocationToCloud(currentLocation);
-  }
 
-  // Background: update name when geocode completes (if still loading)
-  if (!good(name) || name === "Selected Location") {
-    setTimeout(() => {
-      const finalName = (document.getElementById("selectedLocationName")?.textContent || "").trim();
-      if (good(finalName)) {
-        currentLocation.name = finalName;
-        localStorage.setItem("zenvi_location_name", finalName);
-        localStorage.setItem("zenvi_location", JSON.stringify(currentLocation));
-        const el = document.getElementById("homeAddress");
-        if (el) el.innerText = finalName;
-      }
-    }, 3000);
-  }
-
-  // Save as Home prompt if no home saved
-  const allSaved = JSON.parse(localStorage.getItem("zenvi_saved_addresses") || "[]");
-  if (!allSaved.some(a => a.label === "Home") && good(name) && name !== "Selected Location") {
-    setTimeout(() => {
-      const snack = document.createElement("div");
-      snack.style.cssText = "position:fixed;bottom:110px;left:16px;right:16px;z-index:2000;background:#1e293b;color:white;border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,0.3);";
-      snack.innerHTML = `<span style="font-size:20px;">🏠</span><p style="flex:1;font-size:13px;font-weight:600;margin:0;">"${name}" ko Home save karein?</p><button onclick="saveAsAddress('Home');this.parentElement.remove();" style="background:#16a34a;color:white;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Save</button><button onclick="this.parentElement.remove();" style="background:rgba(255,255,255,0.1);color:white;border:none;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;">✕</button>`;
-      document.body.appendChild(snack);
-      setTimeout(() => snack.remove(), 6000);
-    }, 1500);
-  }
-
-  showToast("📍 Location saved!");
-  showPage("home");
+// Clean location name - remove bad strings
+function cleanLocName(n) {
+  const BAD = ["Meri Location","My Location","My Area","Selected Location",
+    "Map drag karo ya search karein","📍 Dhundh raha hai...",""];
+  if (!n || BAD.includes(n) || isCoordinateString(n)) return "Selected Location";
+  return n;
+}
+function cleanLocAddr(a) {
+  const BAD = ["Map drag karo ya search karein","Map pe location chunein...",""];
+  if (!a || BAD.includes(a)) return "";
+  return a;
 }
 
 // ===== SWIGGY-STYLE ADDRESS DETAILS FORM =====
@@ -1437,21 +1399,21 @@ function showAddressDetailsForm(locationName, locationAddr, existingAddr, editId
       <h2 style="font-size:17px;font-weight:800;margin:0;flex:1;">Address Details</h2>
     </div>
 
-    <!-- Mini map preview -->
-    <div style="height:140px;background:linear-gradient(135deg,#f0fdf4,#dcfce7);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;cursor:pointer;" onclick="document.getElementById('addressDetailsModal').style.display='none';showPage('explore');">
-      <span style="font-size:36px;">📍</span>
-      <p style="font-size:14px;font-weight:700;color:#16a34a;margin:0;text-align:center;padding:0 20px;">${locationName && locationName.length > 2 ? locationName : "Location set karein"}</p>
-      <p style="font-size:12px;color:#64748b;margin:0;">${locationAddr && locationAddr !== "Map drag karo ya search karein" ? locationAddr : "Map pe tap karein"}</p>
+    <!-- Mini map preview with location name -->
+    <div style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);padding:20px 16px 16px;text-align:center;">
+      <span style="font-size:32px;display:block;margin-bottom:8px;">📍</span>
+      <p style="font-size:16px;font-weight:800;color:#16a34a;margin:0 0 4px;">${cleanLocName(locationName)}</p>
+      <p style="font-size:12px;color:#64748b;margin:0;">${cleanLocAddr(locationAddr)}</p>
     </div>
 
-    <!-- Location row -->
+    <!-- Editable location row -->
     <div style="margin:12px 16px;background:#fff5f5;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="document.getElementById('addressDetailsModal').style.display='none';showPage('explore');">
       <span class="material-icons-round" style="color:#ef4444;font-size:18px;">location_on</span>
       <div style="flex:1;min-width:0;">
-        <p style="font-size:14px;font-weight:700;color:#1e293b;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${locationName && locationName.length > 2 ? locationName : "Location select karein"}</p>
-        <p style="font-size:12px;color:#64748b;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${locationAddr && locationAddr !== "Map drag karo ya search karein" ? locationAddr : "Explore tab pe jaayein"}</p>
+        <p style="font-size:14px;font-weight:700;color:#1e293b;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${cleanLocName(locationName)}</p>
+        <p style="font-size:12px;color:#64748b;margin:0;">${cleanLocAddr(locationAddr) || "Tap to change location"}</p>
       </div>
-      <span class="material-icons-round" style="color:#94a3b8;font-size:18px;">chevron_right</span>
+      <span class="material-icons-round" style="color:#94a3b8;font-size:18px;">edit</span>
     </div>
 
     <div style="padding:16px;">
@@ -1567,20 +1529,37 @@ window.saveAddressDetails = function(locationName, locationAddr) {
   localStorage.setItem("zenvi_saved_addresses", JSON.stringify(saved));
 
   document.getElementById("addressDetailsModal").style.display = "none";
-  
-  // Update header Zomato style
+
+  // Also save as current location
+  const cleanName = cleanLocName(locationName);
+  currentLocation = { 
+    lat: currentLocation?.lat, lng: currentLocation?.lng,
+    name: cleanName, fullAddr: fullAddress
+  };
+  localStorage.setItem("zenvi_location", JSON.stringify(currentLocation));
+  localStorage.setItem("zenvi_location_name", cleanName);
+  localStorage.setItem("zenvi_location_addr", fullAddress);
+
+  // Update header
   const homeAddrEl = document.getElementById("homeAddress");
   const locLabelEl = document.getElementById("locLabel");
   if (homeAddrEl) {
-    const displayAddr = floor ? floor + ", " + locationName : locationName;
-    homeAddrEl.innerText = displayAddr;
+    homeAddrEl.innerText = floor ? floor + ", " + cleanName : cleanName;
   }
   if (locLabelEl) {
-    const icons = {Home:"🏠",Work:"💼",Other:"📍"};
+    const icons = {Home:"🏠", Work:"💼", Other:"📍"};
     locLabelEl.textContent = (icons[label]||"📍") + " " + label;
   }
-  
-  showToast("✅ " + label + " address saved!");
+
+  // Save to Firebase for recommendations
+  if (window.zenviAuth?.auth?.currentUser && window.saveLocationToCloud) {
+    window.saveLocationToCloud(currentLocation);
+  }
+
+  // Save location to Firebase locations collection (for recommendations)
+  saveLocationForRecommendations(cleanName, fullAddress, currentLocation?.lat, currentLocation?.lng);
+
+  showToast("✅ " + label + " — " + cleanName + " saved!");
   showPage("home");
 };
 
@@ -3771,3 +3750,54 @@ window.openLanguageSelector = function() {
   modal.onclick = e => { if (e.target === modal) modal.style.display = "none"; };
 };
 
+
+// ===== LOCATION RECOMMENDATIONS (Firebase) =====
+async function saveLocationForRecommendations(name, fullAddr, lat, lng) {
+  if (!name || name === "Selected Location" || !window.zenviDB) return;
+  try {
+    // Save to Firebase locations collection
+    const { collection, addDoc, query, where, getDocs, serverTimestamp } = 
+      await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+    
+    const db = window.zenviDB;
+    
+    // Check if already exists
+    const q = query(collection(db, "locations"), where("name", "==", name));
+    const snap = await getDocs(q);
+    
+    if (snap.empty) {
+      await addDoc(collection(db, "locations"), {
+        name, fullAddr: fullAddr || "", lat: lat || 0, lng: lng || 0,
+        searchCount: 1, createdAt: serverTimestamp()
+      });
+    } else {
+      // Increment count
+      const { updateDoc, increment } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+      await updateDoc(snap.docs[0].ref, { searchCount: increment(1) });
+    }
+    console.log("📍 Location saved for recommendations:", name);
+  } catch(e) {
+    console.log("Location recommendation save:", e.message);
+  }
+}
+
+// Load location recommendations for search suggestions
+window.loadLocationRecommendations = async function(query_text) {
+  if (!window.zenviDB || !query_text || query_text.length < 2) return [];
+  try {
+    const { collection, getDocs, orderBy, query, limit } = 
+      await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+    
+    const snap = await getDocs(
+      query(collection(window.zenviDB, "locations"), orderBy("searchCount", "desc"), limit(10))
+    );
+    const results = [];
+    snap.forEach(doc => {
+      const d = doc.data();
+      if (d.name.toLowerCase().includes(query_text.toLowerCase())) {
+        results.push(d);
+      }
+    });
+    return results;
+  } catch(e) { return []; }
+};
