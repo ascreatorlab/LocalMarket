@@ -382,14 +382,15 @@ async function fetchLivePrices() {
     setDataSource("🟢 Live — data.gov.in");
     console.log("✅ Loaded", marketData.length, "fresh items");
 
-    // Init Fuse.js for fuzzy search
+    // Init/update Fuse.js
     if (window.Fuse) {
       window._fuse = new window.Fuse(marketData, {
         keys: ["name","category"],
         threshold: 0.4,
-        includeScore: true
+        includeScore: true,
+        minMatchCharLength: 2
       });
-      console.log("🔍 Fuse.js ready");
+      console.log("🔍 Fuse.js ready with", marketData.length, "items");
     }
 
     // ✅ Save to cache + price history
@@ -1384,108 +1385,170 @@ function cleanLocAddr(a) {
   return a;
 }
 
-// ===== SWIGGY-STYLE ADDRESS DETAILS FORM =====
+// ===== PREMIUM ADDRESS DETAILS FORM (Zomato style) =====
 function showAddressDetailsForm(locationName, locationAddr, existingAddr, editIdx) {
+  const cleanName = cleanLocName(locationName);
+  const cleanAddr = cleanLocAddr(locationAddr);
+  const user = window.zenviAuth?.auth?.currentUser;
+  const savedPhone = getUserPhone();
+  const savedUserName = getUserName();
+
   let modal = document.getElementById("addressDetailsModal");
   if (!modal) { modal = document.createElement("div"); modal.id = "addressDetailsModal"; document.body.appendChild(modal); }
 
-  const user = window.zenviAuth?.auth?.currentUser;
-  const phone = getUserPhone() || (user?.phoneNumber || "");
-  const userName = user?.displayName || getUserName();
+  modal.style.cssText = "position:fixed;inset:0;z-index:3500;background:white;overflow-y:auto;animation:slideUp 0.3s ease;";
 
-  modal.style.cssText = "position:fixed;inset:0;z-index:3500;background:white;overflow-y:auto;";
   modal.innerHTML = `
     <!-- Header -->
-    <div style="display:flex;align-items:center;gap:12px;padding:16px;background:white;border-bottom:1px solid #f1f5f9;position:sticky;top:0;z-index:1;">
-      <button onclick="document.getElementById('addressDetailsModal').style.display='none';"
-        style="background:none;border:none;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:50%;">
-        <span class="material-icons-round">arrow_back</span>
+    <div style="display:flex;align-items:center;gap:12px;padding:16px;background:white;border-bottom:1px solid #f1f5f9;position:sticky;top:0;z-index:10;">
+      <button onclick="document.getElementById('addressDetailsModal').style.display='none';showPage('home');"
+        style="background:none;border:none;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#f1f5f9;">
+        <span class="material-icons-round" style="font-size:20px;">arrow_back</span>
       </button>
-      <h2 style="font-size:17px;font-weight:800;margin:0;flex:1;">Address Details</h2>
+      <h2 style="font-size:17px;font-weight:800;margin:0;flex:1;">Add Address Details</h2>
     </div>
 
-    <!-- Mini map preview with location name -->
-    <div style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);padding:20px 16px 16px;text-align:center;">
-      <span style="font-size:32px;display:block;margin-bottom:8px;">📍</span>
-      <p style="font-size:16px;font-weight:800;color:#16a34a;margin:0 0 4px;">${cleanLocName(locationName)}</p>
-      <p style="font-size:12px;color:#64748b;margin:0;">${cleanLocAddr(locationAddr)}</p>
-    </div>
-
-    <!-- Editable location row -->
-    <div style="margin:12px 16px;background:#fff5f5;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="document.getElementById('addressDetailsModal').style.display='none';showPage('explore');">
-      <span class="material-icons-round" style="color:#ef4444;font-size:18px;">location_on</span>
-      <div style="flex:1;min-width:0;">
-        <p style="font-size:14px;font-weight:700;color:#1e293b;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${cleanLocName(locationName)}</p>
-        <p style="font-size:12px;color:#64748b;margin:0;">${cleanLocAddr(locationAddr) || "Tap to change location"}</p>
+    <!-- Location Preview (Zomato style) -->
+    <div style="margin:16px 16px 0;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:16px;padding:14px 16px;display:flex;align-items:flex-start;gap:12px;">
+      <div style="width:40px;height:40px;background:#16a34a;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <span class="material-icons-round" style="color:white;font-size:20px;">location_on</span>
       </div>
-      <span class="material-icons-round" style="color:#94a3b8;font-size:18px;">edit</span>
+      <div style="flex:1;min-width:0;">
+        <p style="font-size:15px;font-weight:800;color:#15803d;margin:0 0 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          ${cleanName !== "Selected Location" ? cleanName : "Location selected"}
+        </p>
+        <p style="font-size:12px;color:#64748b;margin:0;">${cleanAddr || "Bihar, India"}</p>
+      </div>
+      <button onclick="document.getElementById('addressDetailsModal').style.display='none';showPage('explore');"
+        style="background:none;border:1px solid #16a34a;color:#16a34a;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;">
+        Change
+      </button>
     </div>
 
     <div style="padding:16px;">
 
-      <!-- Delivery location row -->
-      <div style="background:#fff5f5;border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;margin-bottom:20px;cursor:pointer;" onclick="document.getElementById('addressDetailsModal').style.display='none';">
-        <span class="material-icons-round" style="color:#ef4444;font-size:20px;">location_on</span>
-        <div style="flex:1;">
-          <p style="font-size:14px;font-weight:700;color:#1e293b;margin:0;">${locationName}</p>
-          <p style="font-size:12px;color:#64748b;margin:0;">${locationAddr}</p>
+      <!-- ADDRESS DETAILS section -->
+      <p style="font-size:11px;font-weight:800;color:#94a3b8;letter-spacing:0.8px;margin:0 0 10px;">ADDRESS DETAILS</p>
+
+      <div style="margin-bottom:12px;">
+        <input id="addrFloor" type="text" placeholder="House/Flat no., Floor, Building *"
+          value="${existingAddr?.floor || ''}"
+          oninput="validateAddrForm()"
+          style="width:100%;padding:14px;border:1.5px solid #e2e8f0;border-radius:12px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;transition:border-color 0.2s;"
+          onfocus="this.style.borderColor='#16a34a'" onblur="this.style.borderColor='#e2e8f0'">
+        <p id="floorError" style="font-size:11px;color:#ef4444;margin:4px 0 0;display:none;">⚠️ House number required</p>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <input id="addrLandmark" placeholder="Landmark (optional) — e.g. Near Shiv Mandir"
+          value="${existingAddr?.landmark || ''}"
+          style="width:100%;padding:14px;border:1.5px solid #e2e8f0;border-radius:12px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;"
+          onfocus="this.style.borderColor='#16a34a'" onblur="this.style.borderColor='#e2e8f0'">
+      </div>
+
+      <!-- YOUR DETAILS section -->
+      <p style="font-size:11px;font-weight:800;color:#94a3b8;letter-spacing:0.8px;margin:0 0 10px;">YOUR DETAILS</p>
+
+      <div style="margin-bottom:12px;">
+        <div style="border:1.5px solid #e2e8f0;border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;"
+          onfocusin="this.style.borderColor='#16a34a'" onfocusout="this.style.borderColor='#e2e8f0'">
+          <span class="material-icons-round" style="color:#94a3b8;font-size:20px;flex-shrink:0;">person</span>
+          <input id="addrName" placeholder="Your name *" value="${existingAddr?.contactName || savedUserName}"
+            oninput="validateAddrForm()"
+            style="flex:1;border:none;outline:none;font-size:14px;font-family:inherit;font-weight:600;min-width:0;">
         </div>
-        <span class="material-icons-round" style="color:#94a3b8;font-size:18px;">chevron_right</span>
+        <p id="nameError" style="font-size:11px;color:#ef4444;margin:4px 0 0;display:none;">⚠️ Name required</p>
       </div>
 
-      <!-- Address details input -->
-      <p style="font-size:13px;font-weight:700;color:#94a3b8;letter-spacing:0.5px;margin:0 0 10px;">ADDRESS DETAILS</p>
-      
-      <div style="margin-bottom:14px;">
-        <input id="addrFloor" placeholder="House no., Floor, Building name" type="text" value="${existingAddr?.floor || ''}"
-          style="width:100%;padding:14px;border:1.5px solid #e2e8f0;border-radius:12px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;">
-      </div>
       <div style="margin-bottom:20px;">
-        <input id="addrLandmark" placeholder="Landmark (optional) e.g. Near School" value="${existingAddr?.landmark || ''}"
-          style="width:100%;padding:14px;border:1.5px solid #e2e8f0;border-radius:12px;font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;">
+        <div style="border:1.5px solid #e2e8f0;border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;"
+          onfocusin="this.style.borderColor='#16a34a'" onfocusout="this.style.borderColor='#e2e8f0'">
+          <span class="material-icons-round" style="color:#94a3b8;font-size:20px;flex-shrink:0;">phone</span>
+          <input id="addrPhone" type="tel" placeholder="10-digit phone number *" 
+            value="${existingAddr?.phone || savedPhone}"
+            maxlength="10" oninput="validateAddrForm()"
+            style="flex:1;border:none;outline:none;font-size:14px;font-family:inherit;min-width:0;">
+          <span style="font-size:12px;font-weight:700;color:#16a34a;cursor:pointer;" onclick="showToast('📱 Phone verified')">VERIFY</span>
+        </div>
+        <p id="phoneError" style="font-size:11px;color:#ef4444;margin:4px 0 0;display:none;">⚠️ Valid 10-digit number required</p>
       </div>
 
-      <!-- Receiver details -->
-      <p style="font-size:13px;font-weight:700;color:#94a3b8;letter-spacing:0.5px;margin:0 0 10px;">YOUR DETAILS</p>
-      
-      <div style="border:1.5px solid #e2e8f0;border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;margin-bottom:14px;cursor:pointer;">
-        <span class="material-icons-round" style="color:#94a3b8;font-size:20px;">phone</span>
-        <input id="addrName" placeholder="Your name" value="${userName}"
-          style="flex:1;border:none;outline:none;font-size:14px;font-family:inherit;font-weight:600;">
-        <span style="color:#e2e8f0;">|</span>
-        <input id="addrPhone" placeholder="+91 XXXXXXXXXX" value="${phone}" type="tel"
-          style="flex:1;border:none;outline:none;font-size:14px;font-family:inherit;color:#64748b;">
-      </div>
-
-      <!-- Save address as -->
-      <p style="font-size:13px;font-weight:700;color:#94a3b8;letter-spacing:0.5px;margin:0 0 10px;">SAVE ADDRESS AS</p>
-      <div style="display:flex;gap:10px;margin-bottom:20px;" id="addressLabelRow">
-        ${["Home","Work","Other"].map((label, i) => `
-          <button onclick="selectAddressLabel('${label}')" id="label${label}"
+      <!-- SAVE AS section -->
+      <p style="font-size:11px;font-weight:800;color:#94a3b8;letter-spacing:0.8px;margin:0 0 10px;">SAVE ADDRESS AS</p>
+      <div style="display:flex;gap:10px;margin-bottom:24px;" id="addressLabelRow">
+        ${["Home","Work","Other"].map((lbl, i) => `
+          <button onclick="selectAddressLabel('${lbl}')" id="label${lbl}"
             style="flex:1;padding:12px 8px;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;
             border:2px solid ${i===0?'#16a34a':'#e2e8f0'};background:${i===0?'#f0fdf4':'white'};
-            color:${i===0?'#16a34a':'#64748b'};display:flex;align-items:center;justify-content:center;gap:6px;">
-            <span class="material-icons-round" style="font-size:16px;">${label==='Home'?'home':label==='Work'?'business':'location_on'}</span>
-            ${label}
+            color:${i===0?'#16a34a':'#64748b'};display:flex;align-items:center;justify-content:center;gap:6px;transition:all 0.2s;">
+            <span class="material-icons-round" style="font-size:16px;">${lbl==='Home'?'home':lbl==='Work'?'business':'location_on'}</span>
+            ${lbl}
           </button>`).join('')}
       </div>
 
       <!-- Save button -->
-      <button onclick="saveAddressDetails('${locationName}', '${locationAddr}')"
-        style="width:100%;padding:16px;background:#16a34a;color:white;border:none;border-radius:14px;
-        font-size:16px;font-weight:800;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(22,163,74,0.3);">
+      <button id="saveAddrBtn" onclick="saveAddressDetails('${cleanName.replace(/'/g,"\'")}', '${cleanAddr.replace(/'/g,"\'")}', '${locationName}')"
+        style="width:100%;padding:16px;background:#e2e8f0;color:#94a3b8;border:none;border-radius:14px;
+        font-size:16px;font-weight:800;cursor:not-allowed;font-family:inherit;transition:all 0.3s;" disabled>
         Save Address
       </button>
+      <p id="formHint" style="text-align:center;font-size:12px;color:#94a3b8;margin-top:8px;">Fill required fields to enable</p>
 
     </div>
   `;
 
   window._selectedAddressLabel = existingAddr?.label || "Home";
   window._editingAddrIdx = editIdx ?? -1;
-  // Pre-select label button
-  if (existingAddr?.label) setTimeout(() => selectAddressLabel(existingAddr.label), 100);
   modal.style.display = "block";
+
+  // Auto-validate on open (if pre-filled)
+  setTimeout(() => validateAddrForm(), 200);
 }
+
+window.validateAddrForm = function() {
+  const floor = document.getElementById("addrFloor")?.value.trim();
+  const name  = document.getElementById("addrName")?.value.trim();
+  const phone = document.getElementById("addrPhone")?.value.replace(/\D/g,"");
+  const btn   = document.getElementById("saveAddrBtn");
+  const hint  = document.getElementById("formHint");
+
+  const floorErr = document.getElementById("floorError");
+  const nameErr  = document.getElementById("nameError");
+  const phoneErr = document.getElementById("phoneError");
+
+  let valid = true;
+
+  if (!floor) {
+    if (floorErr) floorErr.style.display = "block";
+    valid = false;
+  } else {
+    if (floorErr) floorErr.style.display = "none";
+  }
+
+  if (!name) {
+    if (nameErr) nameErr.style.display = "block";
+    valid = false;
+  } else {
+    if (nameErr) nameErr.style.display = "none";
+  }
+
+  if (phone.length !== 10) {
+    if (phoneErr) phoneErr.style.display = "block";
+    valid = false;
+  } else {
+    if (phoneErr) phoneErr.style.display = "none";
+  }
+
+  if (btn) {
+    btn.disabled = !valid;
+    btn.style.background = valid ? "#16a34a" : "#e2e8f0";
+    btn.style.color = valid ? "white" : "#94a3b8";
+    btn.style.cursor = valid ? "pointer" : "not-allowed";
+    btn.style.boxShadow = valid ? "0 4px 12px rgba(22,163,74,0.3)" : "none";
+  }
+  if (hint) hint.style.display = valid ? "none" : "block";
+  return valid;
+};
 
 window.selectAddressLabel = function(label) {
   window._selectedAddressLabel = label;
@@ -3000,7 +3063,7 @@ window.viewShopDetail = function(shopJson) {
 
       <!-- Buttons -->
       <div style="display:flex;gap:10px;margin-bottom:14px;">
-        ${s.lat && s.lng ? `<button onclick="window.open('https://www.google.com/maps?q=${s.lat},${s.lng}','_blank')" style="flex:1;padding:14px;background:#f0fdf4;color:#16a34a;border:1.5px solid #bbf7d0;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;"><span class="material-icons-round" style="font-size:18px;">map</span> Map</button>` : ""}
+        ${s.lat && s.lng ? `<button onclick="window.open('https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}','_blank')" style="flex:1;padding:14px;background:#f0fdf4;color:#16a34a;border:1.5px solid #bbf7d0;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;"><span class="material-icons-round" style="font-size:18px;">map</span> Map</button>` : ""}
         ${phone ? `<button onclick="window.open('https://wa.me/${phone}?text=Hi! Zenvi app se aapki dukaan dekhi.','_blank')" style="flex:2;padding:14px;background:#16a34a;color:white;border:none;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;">💬 WhatsApp</button>` : ""}
       </div>
       <button onclick="openRateShop('${s.id || s.name}','${s.name}')" style="width:100%;padding:14px;background:white;color:#f59e0b;border:2px solid #fde68a;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">⭐ Rate this Shop</button>
@@ -3395,7 +3458,7 @@ window.shareSavedAddress = function(idx) {
   const addr = saved[idx];
   if (!addr) return;
   const text = addr.label + ": " + (addr.fullAddr || addr.name) +
-    (addr.lat && addr.lng ? "\nMap: https://www.google.com/maps?q=" + addr.lat + "," + addr.lng : "");
+    (addr.lat && addr.lng ? "\nMap: https://www.google.com/maps/search/?api=1&query=" + addr.lat + "," + addr.lng : "");
   if (navigator.share) {
     navigator.share({ title: "My " + addr.label + " Address", text });
   } else {
